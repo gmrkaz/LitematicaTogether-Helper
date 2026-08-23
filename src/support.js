@@ -1,4 +1,4 @@
-const { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, ChannelType, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, ChannelType, EmbedBuilder } = require('discord.js');
 const db=require('./db');const {clean,trunc,isStaff,base}=require('./common');const {log}=require('./infra');
 
 async function openTicket(i){
@@ -6,7 +6,7 @@ async function openTicket(i){
  const c=db.guild(i.guild.id),parent=await i.guild.channels.fetch(c.supportStaffChannelId).catch(()=>null);if(!parent||parent.type!==ChannelType.GuildText)return i.reply({content:'Support Staff is not configured. Staff should run /setup-server.',ephemeral:true});
  const v=id=>i.fields.getTextInputValue(id)||'—';
  await parent.permissionOverwrites.edit(i.user.id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false,SendMessagesInThreads:true,AttachFiles:true,EmbedLinks:true,UseApplicationCommands:true}).catch(()=>{});
- const th=await parent.threads.create({name:`report-${clean(i.user.username)}`,type:ChannelType.PrivateThread,invitable:false,autoArchiveDuration:10080,reason:'LTT Support ticket'});await th.members.add(i.user.id);
+ const th=await parent.threads.create({name:`report-${clean(i.user.username)}`,type:ChannelType.PrivateThread,invitable:false,autoArchiveDuration:1440,reason:'LTT Support ticket'});await th.members.add(i.user.id);
  db.putTicket(th.id,{threadId:th.id,guildId:i.guild.id,userId:i.user.id,status:'open',createdAt:Date.now(),claimedBy:null,name:th.name});
  const row=new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('ticket_claim').setLabel('Claim').setStyle(ButtonStyle.Secondary),new ButtonBuilder().setCustomId('ticket_close').setLabel('Close').setStyle(ButtonStyle.Danger));
  await th.send({content:`<@${i.user.id}>`,embeds:[new EmbedBuilder().setTitle('Support Request').addFields({name:'Topic',value:trunc(v('topic'))},{name:'Versions',value:trunc(v('versions'))},{name:'Problem / expected result',value:trunc(v('problem'))},{name:'Already tried / reproduction',value:trunc(v('tried'))},{name:'Extra',value:trunc(v('extra'))}).setFooter({text:`User ID: ${i.user.id}`}).setTimestamp()],components:[row]});
