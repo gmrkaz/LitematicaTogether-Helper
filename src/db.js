@@ -17,7 +17,7 @@ function save() {
 function guild(id) {
   if (!data.guilds[id]) {
     data.guilds[id] = {
-      supportChannelId: null, modLogChannelId: null, supportStaffChannelId: null, supportRoleId: null,
+      supportChannelId: null, modLogChannelId: null, supportStaffChannelId: null, ticketArchiveChannelId: null, supportRoleId: null, ticketHubReady: false,
       logMessages: String(process.env.LOG_MESSAGES || 'true').toLowerCase() !== 'false',
       logVoice: String(process.env.LOG_VOICE || 'false').toLowerCase() === 'true',
       raidThreshold: Number(process.env.RAID_THRESHOLD || 6),
