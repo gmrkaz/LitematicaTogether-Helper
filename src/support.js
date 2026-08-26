@@ -1,11 +1,12 @@
 const { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, ChannelType, EmbedBuilder } = require('discord.js');
 const db = require('./db');
 const {
-  clean, trunc, isStaff, isHigherStaff, isSupportStaff, isTicketAssignable, base,
+  clean, trunc, isStaff, isHigherStaff, isSupportStaff, isTicketAssignable, SUPPORT_ROLE_ID, base,
 } = require('./common');
 const { log } = require('./infra');
 
 const TICKET_SUPERVISOR_ROLES = ['Owner', 'Co-Owner'];
+const claimLocks = new Set();
 const isTicketSupervisor = m => !!m && (
   m.guild.ownerId === m.id || m.roles.cache.some(r => TICKET_SUPERVISOR_ROLES.includes(r.name))
 );
@@ -130,12 +131,11 @@ async function openTicket(i) {
     new ButtonBuilder().setCustomId('ticket_close').setLabel('Close').setStyle(ButtonStyle.Danger),
   );
 
-  const supportPing = c.supportRoleId ? `<@&${c.supportRoleId}> ` : '';
   await th.send({
-    content: `${supportPing}<@${i.user.id}>`,
+    content: `<@&${SUPPORT_ROLE_ID}> <@${i.user.id}>`,
     allowedMentions: {
       users: [i.user.id],
-      roles: c.supportRoleId ? [c.supportRoleId] : [],
+      roles: [SUPPORT_ROLE_ID],
     },
     embeds: [new EmbedBuilder()
       .setTitle('Support Request')
@@ -168,23 +168,44 @@ async function claimTicket(i) {
     if (t.claimedBy === i.user.id) return i.reply({ content: 'You already claimed this ticket.', ephemeral: true });
     return i.reply({ content: `This ticket is already claimed by <@${t.claimedBy}>.`, ephemeral: true });
   }
+  if (claimLocks.has(i.channelId)) {
+    return i.reply({ content: 'This ticket is being claimed by another support member right now.', ephemeral: true });
+  }
 
-  db.patchTicket(i.channelId, { claimedBy: i.user.id, claimedAt: Date.now() });
-  await i.deferReply({ ephemeral: true });
+  claimLocks.add(i.channelId);
+  try {
+    const latest = db.ticket(i.channelId);
+    if (!latest || latest.status !== 'open') return i.reply({ content: 'Not an open ticket.', ephemeral: true });
+    if (latest.claimedBy) {
+      if (latest.claimedBy === i.user.id) return i.reply({ content: 'You already claimed this ticket.', ephemeral: true });
+      return i.reply({ content: `This ticket is already claimed by <@${latest.claimedBy}>.`, ephemeral: true });
+    }
 
-  const current = db.ticket(i.channelId);
-  await pruneClaimedSupport(i.channel, i.guild, current, i.user.id);
+    db.patchTicket(i.channelId, { claimedBy: i.user.id, claimedAt: Date.now() });
+    await i.deferReply({ ephemeral: true });
 
-  await i.channel.send({
-    content: `🔒 Ticket claimed by <@${i.user.id}>. Other Support Team members were removed. Owner and Co-Owner keep access.`,
-    allowedMentions: { users: [i.user.id] },
-  }).catch(() => {});
+    const disabledRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('ticket_claim').setLabel('Claimed').setStyle(ButtonStyle.Secondary).setDisabled(true),
+      new ButtonBuilder().setCustomId('ticket_close').setLabel('Close').setStyle(ButtonStyle.Danger),
+    );
+    if (i.message?.editable) await i.message.edit({ components: [disabledRow] }).catch(() => {});
 
-  await i.editReply('Ticket claimed. Other Support Team members were removed from this ticket.');
-  await log(i.guild, base('Support ticket claimed').addFields(
-    { name: 'Ticket', value: `<#${i.channelId}>` },
-    { name: 'Claimed by', value: `${i.user.tag} (${i.user.id})` },
-  ));
+    const current = db.ticket(i.channelId);
+    await pruneClaimedSupport(i.channel, i.guild, current, i.user.id);
+
+    await i.channel.send({
+      content: `🔒 Ticket claimed by <@${i.user.id}>. Other Support Team members were removed. Owner and Co-Owner keep access.`,
+      allowedMentions: { users: [i.user.id] },
+    }).catch(() => {});
+
+    await i.editReply('Ticket claimed. Other Support Team members were removed from this ticket.');
+    await log(i.guild, base('Support ticket claimed').addFields(
+      { name: 'Ticket', value: `<#${i.channelId}>` },
+      { name: 'Claimed by', value: `${i.user.tag} (${i.user.id})` },
+    ));
+  } finally {
+    claimLocks.delete(i.channelId);
+  }
 }
 
 function canManageTicket(member, ticket) {
