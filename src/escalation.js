@@ -52,6 +52,21 @@ async function ensureEscalationButtons(message) {
   await message.edit({ components: [...existingRows, ...escalationRows()] }).catch(() => {});
 }
 
+async function restoreOpenTicketButtons(client) {
+  db.refresh?.();
+  for (const ticket of Object.values(db.data.tickets)) {
+    if (ticket.status !== 'open') continue;
+    const channelId = ticket.threadId || ticket.channelId;
+    if (!channelId) continue;
+    const thread = await client.channels.fetch(channelId).catch(() => null);
+    if (!thread?.isThread?.()) continue;
+    const messages = await thread.messages.fetch({ limit: 100 }).catch(() => null);
+    if (!messages?.size) continue;
+    const request = [...messages.values()].find(isSupportRequestMessage);
+    if (request) await ensureEscalationButtons(request);
+  }
+}
+
 function isSupervisor(member) {
   return !!member && (
     member.guild.ownerId === member.id
@@ -215,6 +230,9 @@ async function handleTicketEscalation(i) {
 }
 
 function registerClient(client) {
+  client.once(Events.ClientReady, () => restoreOpenTicketButtons(client).catch(error => {
+    console.error('[TICKET ESCALATION RESTORE]', error);
+  }));
   client.on(Events.MessageCreate, ensureEscalationButtons);
   client.on(Events.MessageUpdate, (_oldMessage, newMessage) => ensureEscalationButtons(newMessage));
   client.on(Events.InteractionCreate, async i => {
