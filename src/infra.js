@@ -3,7 +3,7 @@ const {
   PermissionFlagsBits, TextInputBuilder, TextInputStyle,
 } = require('discord.js');
 const db = require('./db');
-const { HIGH_STAFF, TECH_STAFF } = require('./common');
+const { HIGH_STAFF, TECH_STAFF, SUPPORT_ROLE_ID } = require('./common');
 
 const TICKET_SUPERVISOR_ROLES = ['Owner', 'Co-Owner'];
 const roleByName = (g, n) => g.roles.cache.find(r => r.name === n);
@@ -35,7 +35,8 @@ async function ensureInfrastructure(g, { forcePanel = false } = {}) {
   await g.channels.fetch();
   const cfg = db.guild(g.id);
 
-  const supportRole = await ensureRole(g, 'Support Team', [PermissionFlagsBits.UseApplicationCommands]);
+  let supportRole = g.roles.cache.get(SUPPORT_ROLE_ID) || await g.roles.fetch(SUPPORT_ROLE_ID).catch(() => null);
+  if (!supportRole) supportRole = await ensureRole(g, 'Support Team', [PermissionFlagsBits.UseApplicationCommands]);
 
   // Support Team must NOT have ManageThreads globally: otherwise claimed private tickets remain visible.
   if (supportRole.permissions.has(PermissionFlagsBits.ManageThreads) && !supportRole.permissions.has(PermissionFlagsBits.Administrator)) {

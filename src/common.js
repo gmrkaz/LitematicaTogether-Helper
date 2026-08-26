@@ -3,6 +3,7 @@ const { EmbedBuilder, PermissionFlagsBits, SlashCommandBuilder } = require('disc
 const HIGH_STAFF = ['Owner','Co-Owner','Administrator','Moderator'];
 const TECH_STAFF = ['Developer','Tech Team','Technical Team'];
 const SUPPORT_ROLE = 'Support Team';
+const SUPPORT_ROLE_ID = process.env.SUPPORT_ROLE_ID || '1540936198988759080';
 const STAFF = [...HIGH_STAFF, ...TECH_STAFF, SUPPORT_ROLE];
 
 const trunc = (v, n=1000) => { const s = String(v || '—'); return s.length > n ? `${s.slice(0,n-1)}…` : s; };
@@ -10,7 +11,7 @@ const clean = v => String(v || 'user').toLowerCase().replace(/[^a-z0-9-_]/g,'-')
 const base = title => new EmbedBuilder().setTitle(title).setTimestamp();
 const hasNamedRole = (m, names) => !!m?.roles?.cache?.some(r => names.includes(r.name));
 const isHigherStaff = m => !!m && (m.guild.ownerId === m.id || m.permissions.has(PermissionFlagsBits.Administrator) || hasNamedRole(m, HIGH_STAFF));
-const isSupportStaff = m => !!m && hasNamedRole(m, [SUPPORT_ROLE]);
+const isSupportStaff = m => !!m && (m.roles.cache.has(SUPPORT_ROLE_ID) || hasNamedRole(m, [SUPPORT_ROLE]));
 const isTechnicalStaff = m => !!m && hasNamedRole(m, TECH_STAFF);
 const isStaff = m => !!m && (isHigherStaff(m) || isSupportStaff(m) || isTechnicalStaff(m));
 const isTicketAssignable = m => isStaff(m);
@@ -40,7 +41,7 @@ const DONATIONS = [
 function donationPayload() { return { embeds:[new EmbedBuilder().setTitle('Support Litematica Together').setDescription(['If you want to support development, use one of the addresses below.','',...DONATIONS.map(([a,n,x])=>`**${a} — ${n}**\n\`${x}\``),'','**Important:** send only the listed asset through the exact network shown. A wrong network can permanently lose funds.'].join('\n\n')).setFooter({text:'Thank you for supporting Litematica Together.'})], allowedMentions:{parse:[]} }; }
 
 module.exports = {
-  HIGH_STAFF, TECH_STAFF, SUPPORT_ROLE, STAFF,
+  HIGH_STAFF, TECH_STAFF, SUPPORT_ROLE, SUPPORT_ROLE_ID, STAFF,
   trunc, clean, base, isHigherStaff, isSupportStaff, isTechnicalStaff, isStaff, isTicketAssignable,
   duration, commands, donationPayload,
 };
