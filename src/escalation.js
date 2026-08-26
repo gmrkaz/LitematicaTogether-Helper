@@ -1,4 +1,4 @@
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, Client, Events } = require('discord.js');
 const db = require('./db');
 
 const ROLE_CALLS = {
@@ -13,6 +13,7 @@ const OWNER_CALL_ID = 'ticket_call_ametist';
 const OWNER_DISCORD_ID = '1435432634900811779';
 const CALL_COOLDOWN_MS = Number(process.env.TICKET_CALL_COOLDOWN_MS || 10 * 60 * 1000);
 const SUPERVISOR_ROLES = ['Owner', 'Co-Owner'];
+const installed = Symbol.for('ltt.ticketEscalationInstalled');
 
 function escalationRows() {
   return [
@@ -33,6 +34,24 @@ function escalationRows() {
   ];
 }
 
+function isSupportRequestMessage(message) {
+  return message?.author?.id === message.client.user?.id
+    && message.embeds?.some(e => e.title === 'Support Request');
+}
+
+function hasEscalationButtons(message) {
+  return message.components?.some(row =>
+    row.components?.some(component => component.customId === 'ticket_call_developer')
+  );
+}
+
+async function ensureEscalationButtons(message) {
+  if (!isSupportRequestMessage(message) || hasEscalationButtons(message) || !message.editable) return;
+  const existingRows = message.components || [];
+  if (existingRows.length > 3) return;
+  await message.edit({ components: [...existingRows, ...escalationRows()] }).catch(() => {});
+}
+
 function isSupervisor(member) {
   return !!member && (
     member.guild.ownerId === member.id
@@ -42,6 +61,45 @@ function isSupervisor(member) {
 
 function canEscalate(member, ticket) {
   return isSupervisor(member) || ticket.claimedBy === member.id;
+}
+
+async function recoverTicket(i) {
+  const existing = db.ticket(i.channelId);
+  if (existing) return existing;
+  if (!i.guild || !i.channel?.isThread?.() || i.channel.locked) return null;
+
+  const cfg = db.guild(i.guild.id);
+  if (!cfg.supportStaffChannelId || i.channel.parentId !== cfg.supportStaffChannelId) return null;
+
+  const messages = await i.channel.messages.fetch({ limit: 100 }).catch(() => null);
+  if (!messages?.size) return null;
+  const request = [...messages.values()].find(isSupportRequestMessage);
+  if (!request) return null;
+
+  const requestEmbed = request.embeds.find(e => e.title === 'Support Request');
+  const ownerId = requestEmbed?.footer?.text?.match(/^User ID:\s*(\d+)$/)?.[1];
+  if (!ownerId) return null;
+
+  const claimMessage = [...messages.values()]
+    .filter(m => m.author?.id === i.client.user.id && /Ticket claimed by <@\d+>/.test(m.content || ''))
+    .sort((a, b) => b.createdTimestamp - a.createdTimestamp)[0];
+  const claimedBy = claimMessage?.content?.match(/Ticket claimed by <@(\d+)>/)?.[1] || null;
+
+  const recovered = {
+    threadId: i.channelId,
+    guildId: i.guild.id,
+    userId: ownerId,
+    status: 'open',
+    createdAt: request.createdTimestamp || Date.now(),
+    claimedBy,
+    claimedAt: claimMessage?.createdTimestamp || null,
+    addedMembers: [],
+    escalations: {},
+    name: i.channel.name,
+    recoveredAt: Date.now(),
+  };
+  db.putTicket(i.channelId, recovered);
+  return recovered;
 }
 
 function cooldownRemaining(ticket, key) {
@@ -126,7 +184,7 @@ async function handleTicketEscalation(i) {
   const isOwnerCall = i.customId === OWNER_CALL_ID;
   if (!cfg && !isOwnerCall) return false;
 
-  const ticket = db.ticket(i.channelId);
+  const ticket = await recoverTicket(i);
   if (!ticket || ticket.status !== 'open') {
     await i.reply({ content: 'This is not an open Support ticket.', ephemeral: true });
     return true;
@@ -156,7 +214,35 @@ async function handleTicketEscalation(i) {
   return true;
 }
 
+function registerClient(client) {
+  client.on(Events.MessageCreate, ensureEscalationButtons);
+  client.on(Events.MessageUpdate, (_oldMessage, newMessage) => ensureEscalationButtons(newMessage));
+  client.on(Events.InteractionCreate, async i => {
+    if (!i.inGuild() || !i.isButton()) return;
+    try {
+      await handleTicketEscalation(i);
+    } catch (error) {
+      console.error('[TICKET ESCALATION]', error);
+      if (!i.isRepliable()) return;
+      const payload = { content: `Escalation failed: ${String(error.message || error).slice(0, 1200)}`, ephemeral: true };
+      if (i.replied || i.deferred) await i.editReply(payload).catch(() => {});
+      else await i.reply(payload).catch(() => {});
+    }
+  });
+}
+
+function installEscalationHook() {
+  if (Client.prototype[installed]) return;
+  Client.prototype[installed] = true;
+  const originalLogin = Client.prototype.login;
+  Client.prototype.login = function patchedLogin(...args) {
+    registerClient(this);
+    return originalLogin.apply(this, args);
+  };
+}
+
 module.exports = {
   escalationRows,
   handleTicketEscalation,
+  installEscalationHook,
 };
