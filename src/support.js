@@ -30,6 +30,49 @@ async function addThreadMember(thread, id) {
   await thread.members.add(id).catch(() => {});
 }
 
+async function ticketForInteraction(i) {
+  const existing = db.ticket(i.channelId);
+  if (existing) return existing;
+  if (!i.guild || !i.channel?.isThread?.()) return null;
+
+  const cfg = db.guild(i.guild.id);
+  if (!cfg.supportStaffChannelId || i.channel.parentId !== cfg.supportStaffChannelId) return null;
+  if (i.channel.locked) return null;
+
+  const messages = await i.channel.messages.fetch({ limit: 100 }).catch(() => null);
+  if (!messages?.size) return null;
+
+  const request = [...messages.values()].find(m =>
+    m.author?.id === i.client.user.id
+    && m.embeds?.some(e => e.title === 'Support Request' && /^User ID:\s*\d+$/.test(e.footer?.text || ''))
+  );
+  if (!request) return null;
+
+  const requestEmbed = request.embeds.find(e => e.title === 'Support Request');
+  const ownerId = requestEmbed?.footer?.text?.match(/^User ID:\s*(\d+)$/)?.[1];
+  if (!ownerId) return null;
+
+  const claimMessage = [...messages.values()]
+    .filter(m => m.author?.id === i.client.user.id && /Ticket claimed by <@\d+>/.test(m.content || ''))
+    .sort((a, b) => b.createdTimestamp - a.createdTimestamp)[0];
+  const claimedBy = claimMessage?.content?.match(/Ticket claimed by <@(\d+)>/)?.[1] || null;
+
+  const recovered = {
+    threadId: i.channelId,
+    guildId: i.guild.id,
+    userId: ownerId,
+    status: 'open',
+    createdAt: request.createdTimestamp || Date.now(),
+    claimedBy,
+    claimedAt: claimMessage?.createdTimestamp || null,
+    addedMembers: [],
+    name: i.channel.name,
+    recoveredAt: Date.now(),
+  };
+  db.putTicket(i.channelId, recovered);
+  return recovered;
+}
+
 async function seedUnclaimedTicket(thread, guild, ownerId) {
   const members = await fetchGuildMembers(guild);
   await addThreadMember(thread, ownerId);
@@ -159,7 +202,7 @@ async function openTicket(i) {
 }
 
 async function claimTicket(i) {
-  const t = db.ticket(i.channelId);
+  const t = await ticketForInteraction(i);
   if (!t || t.status !== 'open') return i.reply({ content: 'Not an open ticket.', ephemeral: true });
   if (!isTicketSupervisor(i.member) && !isSupportStaff(i.member)) {
     return i.reply({ content: 'Only Support Team, Owner or Co-Owner can claim tickets.', ephemeral: true });
@@ -174,7 +217,7 @@ async function claimTicket(i) {
 
   claimLocks.add(i.channelId);
   try {
-    const latest = db.ticket(i.channelId);
+    const latest = await ticketForInteraction(i);
     if (!latest || latest.status !== 'open') return i.reply({ content: 'Not an open ticket.', ephemeral: true });
     if (latest.claimedBy) {
       if (latest.claimedBy === i.user.id) return i.reply({ content: 'You already claimed this ticket.', ephemeral: true });
@@ -213,7 +256,7 @@ function canManageTicket(member, ticket) {
 }
 
 async function addTicketMember(i) {
-  const t = db.ticket(i.channelId);
+  const t = await ticketForInteraction(i);
   if (!t || t.status !== 'open') return i.reply({ content: 'Not an open ticket.', ephemeral: true });
   if (!canManageTicket(i.member, t)) {
     return i.reply({ content: t.claimedBy ? 'Only the staff member who claimed this ticket, Owner or Co-Owner can add people.' : 'Claim this ticket first.', ephemeral: true });
@@ -237,7 +280,7 @@ async function addTicketMember(i) {
 }
 
 async function removeTicketMember(i) {
-  const t = db.ticket(i.channelId);
+  const t = await ticketForInteraction(i);
   if (!t || t.status !== 'open') return i.reply({ content: 'Not an open ticket.', ephemeral: true });
   if (!canManageTicket(i.member, t)) {
     return i.reply({ content: 'Only the staff member who claimed this ticket, Owner or Co-Owner can remove added people.', ephemeral: true });
@@ -260,9 +303,9 @@ async function removeTicketMember(i) {
 }
 
 async function closeTicket(i) {
-  const t = db.ticket(i.channelId);
+  const t = await ticketForInteraction(i);
   if (!t || t.status !== 'open') return i.reply({ content: 'This is not an open Support ticket.', ephemeral: true });
-  if (i.user.id !== t.userId && !isStaff(i.member)) {
+  if (i.user.id !== t.userId && !isTicketSupervisor(i.member) && !isStaff(i.member)) {
     return i.reply({ content: 'Only the ticket owner or staff can close this ticket.', ephemeral: true });
   }
 
