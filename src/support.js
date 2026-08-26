@@ -5,6 +5,11 @@ const {
 } = require('./common');
 const { log } = require('./infra');
 
+const TICKET_SUPERVISOR_ROLES = ['Owner', 'Co-Owner'];
+const isTicketSupervisor = m => !!m && (
+  m.guild.ownerId === m.id || m.roles.cache.some(r => TICKET_SUPERVISOR_ROLES.includes(r.name))
+);
+
 const ownerOverwrite = {
   ViewChannel: true,
   ReadMessageHistory: true,
@@ -29,7 +34,7 @@ async function seedUnclaimedTicket(thread, guild, ownerId) {
   await addThreadMember(thread, ownerId);
   for (const member of members.values()) {
     if (member.user.bot) continue;
-    if (isHigherStaff(member) || isSupportStaff(member)) await addThreadMember(thread, member.id);
+    if (isTicketSupervisor(member) || isSupportStaff(member)) await addThreadMember(thread, member.id);
   }
 }
 
@@ -43,8 +48,10 @@ async function pruneClaimedSupport(thread, guild, ticket, claimerId) {
     if (!id || id === ticket.userId || id === claimerId || added.has(id) || id === guild.members.me?.id) continue;
     const member = members.get(id) || await guild.members.fetch(id).catch(() => null);
     if (!member) continue;
-    if (isHigherStaff(member)) continue;
-    if (isSupportStaff(member)) await thread.members.remove(id, 'Ticket claimed by another Support Team member').catch(() => {});
+    if (isTicketSupervisor(member)) continue;
+    if (isSupportStaff(member) || isHigherStaff(member)) {
+      await thread.members.remove(id, 'Ticket claimed by another Support Team member').catch(() => {});
+    }
   }
 }
 
@@ -52,7 +59,7 @@ async function syncTicketAccess(guild) {
   const cfg = db.guild(guild.id);
   const hub = cfg.supportStaffChannelId ? await guild.channels.fetch(cfg.supportStaffChannelId).catch(() => null) : null;
   const members = await fetchGuildMembers(guild);
-  const higher = [...members.values()].filter(m => !m.user.bot && isHigherStaff(m));
+  const supervisors = [...members.values()].filter(m => !m.user.bot && isTicketSupervisor(m));
   const support = [...members.values()].filter(m => !m.user.bot && isSupportStaff(m));
 
   for (const ticket of Object.values(db.data.tickets)) {
@@ -67,7 +74,7 @@ async function syncTicketAccess(guild) {
     }
 
     await addThreadMember(thread, ticket.userId);
-    for (const member of higher) await addThreadMember(thread, member.id);
+    for (const member of supervisors) await addThreadMember(thread, member.id);
     for (const id of ticket.addedMembers || []) await addThreadMember(thread, id);
 
     if (ticket.claimedBy) {
@@ -123,8 +130,13 @@ async function openTicket(i) {
     new ButtonBuilder().setCustomId('ticket_close').setLabel('Close').setStyle(ButtonStyle.Danger),
   );
 
+  const supportPing = c.supportRoleId ? `<@&${c.supportRoleId}> ` : '';
   await th.send({
-    content: `<@${i.user.id}>`,
+    content: `${supportPing}<@${i.user.id}>`,
+    allowedMentions: {
+      users: [i.user.id],
+      roles: c.supportRoleId ? [c.supportRoleId] : [],
+    },
     embeds: [new EmbedBuilder()
       .setTitle('Support Request')
       .addFields(
@@ -149,8 +161,8 @@ async function openTicket(i) {
 async function claimTicket(i) {
   const t = db.ticket(i.channelId);
   if (!t || t.status !== 'open') return i.reply({ content: 'Not an open ticket.', ephemeral: true });
-  if (!isHigherStaff(i.member) && !isSupportStaff(i.member)) {
-    return i.reply({ content: 'Only Support Team or higher staff can claim tickets.', ephemeral: true });
+  if (!isTicketSupervisor(i.member) && !isSupportStaff(i.member)) {
+    return i.reply({ content: 'Only Support Team, Owner or Co-Owner can claim tickets.', ephemeral: true });
   }
   if (t.claimedBy) {
     if (t.claimedBy === i.user.id) return i.reply({ content: 'You already claimed this ticket.', ephemeral: true });
@@ -164,7 +176,7 @@ async function claimTicket(i) {
   await pruneClaimedSupport(i.channel, i.guild, current, i.user.id);
 
   await i.channel.send({
-    content: `🔒 Ticket claimed by <@${i.user.id}>. Other Support Team members no longer have access. Higher staff keeps access.`,
+    content: `🔒 Ticket claimed by <@${i.user.id}>. Other Support Team members were removed. Owner and Co-Owner keep access.`,
     allowedMentions: { users: [i.user.id] },
   }).catch(() => {});
 
@@ -176,14 +188,14 @@ async function claimTicket(i) {
 }
 
 function canManageTicket(member, ticket) {
-  return isHigherStaff(member) || ticket.claimedBy === member.id;
+  return isTicketSupervisor(member) || ticket.claimedBy === member.id;
 }
 
 async function addTicketMember(i) {
   const t = db.ticket(i.channelId);
   if (!t || t.status !== 'open') return i.reply({ content: 'Not an open ticket.', ephemeral: true });
   if (!canManageTicket(i.member, t)) {
-    return i.reply({ content: t.claimedBy ? 'Only the staff member who claimed this ticket or higher staff can add people.' : 'Claim this ticket first.', ephemeral: true });
+    return i.reply({ content: t.claimedBy ? 'Only the staff member who claimed this ticket, Owner or Co-Owner can add people.' : 'Claim this ticket first.', ephemeral: true });
   }
 
   const user = i.options.getUser('user', true);
@@ -207,7 +219,7 @@ async function removeTicketMember(i) {
   const t = db.ticket(i.channelId);
   if (!t || t.status !== 'open') return i.reply({ content: 'Not an open ticket.', ephemeral: true });
   if (!canManageTicket(i.member, t)) {
-    return i.reply({ content: 'Only the staff member who claimed this ticket or higher staff can remove added people.', ephemeral: true });
+    return i.reply({ content: 'Only the staff member who claimed this ticket, Owner or Co-Owner can remove added people.', ephemeral: true });
   }
 
   const user = i.options.getUser('user', true);
@@ -215,7 +227,7 @@ async function removeTicketMember(i) {
   if (user.id === t.claimedBy) return i.reply({ content: 'You cannot remove the staff member who claimed the ticket.', ephemeral: true });
 
   const member = await i.guild.members.fetch(user.id).catch(() => null);
-  if (member && isHigherStaff(member)) return i.reply({ content: 'Higher staff always keeps access to tickets.', ephemeral: true });
+  if (member && isTicketSupervisor(member)) return i.reply({ content: 'Owner and Co-Owner always keep access to tickets.', ephemeral: true });
 
   const addedMembers = t.addedMembers || [];
   if (!addedMembers.includes(user.id)) return i.reply({ content: 'That member was not manually added to this ticket.', ephemeral: true });
@@ -263,7 +275,7 @@ async function closeTicket(i) {
   }
 
   db.patchTicket(i.channelId, { status: 'closed', closedAt: Date.now(), closedBy: i.user.id, transcriptSaved: true });
-  await i.editReply('Ticket closed. The conversation was saved for higher staff.');
+  await i.editReply('Ticket closed. The conversation was saved for staff.');
 
   const parent = i.channel.parent;
   if (parent?.permissionOverwrites) await parent.permissionOverwrites.delete(t.userId, 'Support ticket closed').catch(() => {});
