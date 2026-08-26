@@ -5,6 +5,7 @@ const {
 const db = require('./db');
 const { HIGH_STAFF, TECH_STAFF } = require('./common');
 
+const TICKET_SUPERVISOR_ROLES = ['Owner', 'Co-Owner'];
 const roleByName = (g, n) => g.roles.cache.find(r => r.name === n);
 const channelByName = (g, n, t) => g.channels.cache.find(c => c.name === n && (!t || t.includes(c.type)));
 
@@ -36,7 +37,7 @@ async function ensureInfrastructure(g, { forcePanel = false } = {}) {
 
   const supportRole = await ensureRole(g, 'Support Team', [PermissionFlagsBits.UseApplicationCommands]);
 
-  // Support Team must NOT have ManageThreads: otherwise claimed private tickets remain visible.
+  // Support Team must NOT have ManageThreads globally: otherwise claimed private tickets remain visible.
   if (supportRole.permissions.has(PermissionFlagsBits.ManageThreads) && !supportRole.permissions.has(PermissionFlagsBits.Administrator)) {
     await supportRole.setPermissions(
       supportRole.permissions.remove(PermissionFlagsBits.ManageThreads),
@@ -69,6 +70,32 @@ async function ensureInfrastructure(g, { forcePanel = false } = {}) {
   for (const n of TECH_STAFF) {
     const r = roleByName(g, n);
     if (r) staffPO.push({ id: r.id, allow: staffAllow });
+  }
+
+  // Ticket hub is stricter than the rest of STAFF: only Owner / Co-Owner may ManageThreads.
+  // Everyone else can see the parent but needs explicit private-thread membership.
+  const ticketPO = [
+    { id: g.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+    { id: supportRole.id, allow: staffAllow },
+  ];
+  for (const n of HIGH_STAFF) {
+    const r = roleByName(g, n);
+    if (!r) continue;
+    ticketPO.push({
+      id: r.id,
+      allow: TICKET_SUPERVISOR_ROLES.includes(n) ? highStaffAllow : staffAllow,
+      deny: TICKET_SUPERVISOR_ROLES.includes(n) ? [] : [PermissionFlagsBits.ManageThreads],
+    });
+  }
+  for (const n of TECH_STAFF) {
+    const r = roleByName(g, n);
+    if (r) ticketPO.push({ id: r.id, allow: staffAllow, deny: [PermissionFlagsBits.ManageThreads] });
+  }
+  if (g.members.me?.id) {
+    ticketPO.push({
+      id: g.members.me.id,
+      allow: [...highStaffAllow, PermissionFlagsBits.MentionEveryone],
+    });
   }
 
   const highOnlyPO = [{ id: g.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] }];
@@ -104,13 +131,13 @@ async function ensureInfrastructure(g, { forcePanel = false } = {}) {
       name: 'support-staff',
       type: ChannelType.GuildText,
       parent: staffCat.id,
-      permissionOverwrites: staffPO,
-      topic: 'Private ticket hub. Unclaimed tickets are visible to Support Team; claimed tickets are visible only to the assignee, higher staff and explicitly added staff.',
+      permissionOverwrites: ticketPO,
+      topic: 'Unclaimed tickets ping Support Team. After claim only the assignee, ticket owner, Owner/Co-Owner and explicitly added staff retain access.',
     });
   } else {
     await ticketHub.setParent(staffCat.id, { lockPermissions: false }).catch(() => {});
-    await ticketHub.permissionOverwrites.set(staffPO).catch(() => {});
-    await ticketHub.setTopic('Private ticket hub. Unclaimed tickets are visible to Support Team; claimed tickets are visible only to the assignee, higher staff and explicitly added staff.').catch(() => {});
+    await ticketHub.permissionOverwrites.set(ticketPO).catch(() => {});
+    await ticketHub.setTopic('Unclaimed tickets ping Support Team. After claim only the assignee, ticket owner, Owner/Co-Owner and explicitly added staff retain access.').catch(() => {});
   }
 
   let archive = channelByName(g, 'ticket-archive', [ChannelType.GuildText]);
