@@ -3,12 +3,12 @@
 const http = require('node:http');
 const crypto = require('node:crypto');
 
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const BOT_TOKEN = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const SHARED_SECRET = process.env.OWNER_BOT_SHARED_SECRET;
 const PORT = Number(process.env.PORT || process.env.SERVER_PORT || 3000);
 
-if (!BOT_TOKEN) throw new Error('Missing TELEGRAM_BOT_TOKEN');
+if (!BOT_TOKEN) throw new Error('Missing BOT_TOKEN/TELEGRAM_BOT_TOKEN');
 if (!CHAT_ID) throw new Error('Missing TELEGRAM_CHAT_ID');
 if (!SHARED_SECRET || SHARED_SECRET.length < 24) {
   throw new Error('Missing or weak OWNER_BOT_SHARED_SECRET (use at least 24 characters)');
