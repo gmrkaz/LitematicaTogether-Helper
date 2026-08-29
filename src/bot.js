@@ -2,6 +2,7 @@ const { Client, Events, GatewayIntentBits, Partials } = require('discord.js');
 const db = require('./db');
 const { commands, donationPayload, trunc, duration, base } = require('./common');
 const { ensureInfrastructure, postPanel, supportModal, log } = require('./infra');
+const { ensureCommunityInfrastructure, applyHiddenRoleToChannel } = require('./community');
 const {
   openTicket, claimTicket, closeTicket, addTicketMember, removeTicketMember, syncTicketAccess,
 } = require('./support');
@@ -26,7 +27,12 @@ const joins = new Map();
 
 async function prepareGuild(guild, { forcePanel = false } = {}) {
   await guild.commands.set(commands);
-  if (AUTO || forcePanel) await ensureInfrastructure(guild, { forcePanel });
+  if (AUTO || forcePanel) {
+    await ensureInfrastructure(guild, { forcePanel });
+    await ensureCommunityInfrastructure(guild, {
+      supportChannelId: db.guild(guild.id).supportChannelId,
+    });
+  }
   await syncTicketAccess(guild);
 }
 
@@ -36,7 +42,7 @@ client.once(Events.ClientReady, async c => {
     if (TARGET && g.id !== TARGET) continue;
     try {
       await prepareGuild(g);
-      console.log(`[SETUP] Infrastructure and ticket access ready in ${g.name}`);
+      console.log(`[SETUP] Infrastructure, community info and ticket access ready in ${g.name}`);
     } catch (e) {
       console.error(`[SETUP] ${g.name}`, e);
     }
@@ -73,8 +79,11 @@ client.on(Events.InteractionCreate, async i => {
     if (i.commandName === 'setup-server') {
       await i.deferReply({ ephemeral: true });
       await ensureInfrastructure(i.guild, { forcePanel: true });
+      await ensureCommunityInfrastructure(i.guild, {
+        supportChannelId: db.guild(i.guild.id).supportChannelId,
+      });
       await syncTicketAccess(i.guild);
-      return i.editReply('Support and monitoring infrastructure is ready.');
+      return i.editReply('Support, community info and monitoring infrastructure is ready.');
     }
 
     if (i.commandName === 'support-panel') {
@@ -192,7 +201,11 @@ client.on(Events.GuildMemberRemove, m => {
 });
 client.on(Events.GuildBanAdd, b => log(b.guild, base('Member banned').addFields({ name: 'User', value: `${b.user.tag} (${b.user.id})` })));
 client.on(Events.GuildBanRemove, b => log(b.guild, base('Member unbanned').addFields({ name: 'User', value: `${b.user.tag} (${b.user.id})` })));
-client.on(Events.ChannelCreate, c => c.guild && log(c.guild, base('Channel created').addFields({ name: 'Channel', value: `${c.name} (${c.id})` })));
+client.on(Events.ChannelCreate, async c => {
+  if (!c.guild) return;
+  await applyHiddenRoleToChannel(c).catch(e => console.error('[HIDDEN ROLE]', e));
+  return log(c.guild, base('Channel created').addFields({ name: 'Channel', value: `${c.name} (${c.id})` }));
+});
 client.on(Events.ChannelDelete, c => c.guild && log(c.guild, base('Channel deleted').addFields({ name: 'Channel', value: `${c.name} (${c.id})` })));
 client.on(Events.GuildRoleCreate, r => log(r.guild, base('Role created').addFields({ name: 'Role', value: `${r.name} (${r.id})` })));
 client.on(Events.GuildRoleDelete, r => log(r.guild, base('Role deleted').addFields({ name: 'Role', value: `${r.name} (${r.id})` })));
