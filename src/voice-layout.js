@@ -190,15 +190,13 @@ async function normalizeInternationalVoice(guild) {
     if (!cfg.englishLanguageVoiceIds.includes(shared.id)) cfg.englishLanguageVoiceIds.push(shared.id);
     db.save();
 
-    if (deletedIds.size) {
-      await patchNativeOnboarding(
-        guild,
-        deletedIds,
-        shared.id,
-        russianRole,
-        englishRole,
-      );
-    }
+    await patchNativeOnboarding(
+      guild,
+      deletedIds,
+      shared.id,
+      russianRole,
+      englishRole,
+    );
 
     return shared;
   } catch (error) {
