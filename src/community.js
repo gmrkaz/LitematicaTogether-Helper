@@ -69,6 +69,7 @@ function welcomePayload() {
         '',
         'Please read **#rules** and check **#faq** if you have questions.',
       ].join('\n'))],
+    components: [],
     allowedMentions: { parse: [] },
   };
 }
