@@ -4,9 +4,9 @@ const {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, EmbedBuilder, PermissionFlagsBits,
 } = require('discord.js');
 const db = require('./db');
+const { cleanupGithubChannels } = require('./channel-cleanup');
 
 const MODRINTH_URL = 'https://modrinth.com/mod/litematica-together';
-const HELPER_GITHUB_URL = 'https://github.com/gmrkaz/LitematicaTogether-Helper';
 
 const START_HERE_CHANNELS = [
   ['приветствие', 'Русская версия приветствия и основной информации.'],
@@ -21,7 +21,6 @@ const PROJECT_CHANNELS = [
   ['обновления', 'Автоматические новости о новых версиях Litematica Together.'],
   ['дорожная-карта', 'Дорожная карта и планы проекта на русском языке.'],
   ['известные-проблемы', 'Известные проблемы и обходные решения на русском языке.'],
-  ['github-ru', 'GitHub и исходный код инфраструктуры проекта.'],
 ];
 
 const roleByNames = (guild, names) => guild.roles.cache.find(role => (
@@ -75,9 +74,7 @@ function russianOverwrites(guild, russianRole, hiddenRole) {
     },
   ];
 
-  if (hiddenRole) {
-    overwrites.push({ id: hiddenRole.id, deny: [PermissionFlagsBits.ViewChannel] });
-  }
+  if (hiddenRole) overwrites.push({ id: hiddenRole.id, deny: [PermissionFlagsBits.ViewChannel] });
 
   if (guild.members.me?.id) {
     overwrites.push({
@@ -250,27 +247,10 @@ function issuesPayload() {
   );
 }
 
-function githubPayload() {
-  const payload = ruEmbed(
-    'GitHub',
-    [
-      'Здесь находятся ссылки на GitHub-ресурсы проекта.',
-      '',
-      `**LitematicaTogether Helper / Discord / relay infrastructure:**\n${HELPER_GITHUB_URL}`,
-      '',
-      'Если будет опубликован отдельный репозиторий самого мода, его ссылку можно добавить сюда отдельно.',
-    ].join('\n'),
-    'LTT-RU:github',
-  );
-  payload.components = [new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setLabel('Открыть GitHub Helper').setStyle(ButtonStyle.Link).setURL(HELPER_GITHUB_URL),
-  )];
-  return payload;
-}
-
 async function ensureRussianChannels(guild, { supportChannelId = null } = {}) {
   await guild.roles.fetch();
   await guild.channels.fetch();
+  await cleanupGithubChannels(guild);
 
   const russianRole = roleByNames(guild, ['Русский', 'Russian']);
   if (!russianRole) {
@@ -297,7 +277,6 @@ async function ensureRussianChannels(guild, { supportChannelId = null } = {}) {
   await upsert(channels['о-проекте'], 'LTT-RU:about', aboutPayload());
   await upsert(channels['дорожная-карта'], 'LTT-RU:roadmap', roadmapPayload());
   await upsert(channels['известные-проблемы'], 'LTT-RU:issues', issuesPayload());
-  await upsert(channels['github-ru'], 'LTT-RU:github', githubPayload());
 
   const cfg = db.guild(guild.id);
   cfg.russianChannelIds = Object.fromEntries(
