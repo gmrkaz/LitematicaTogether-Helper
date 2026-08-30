@@ -6,6 +6,7 @@ const HIDDEN_ROLE_NAME = 'Hidden';
 const RUSSIAN_ROLE_NAME = 'Русский';
 const ENGLISH_ROLE_NAME = 'English';
 const LANGUAGE_PROMPT_TITLE = 'На русском или английском? / Russian or English?';
+const ONBOARDING_REST_TIMEOUT_MS = Number(process.env.ONBOARDING_REST_TIMEOUT_MS || 6000);
 
 const VOICE_LAYOUT = [
   { key: 'main', ru: '🇷🇺 Основной', en: '🇬🇧 Main' },
@@ -19,6 +20,14 @@ const VOICE_LAYOUT = [
 const roleByName = (guild, name) => guild.roles.cache.find(
   role => role.name.toLowerCase() === name.toLowerCase(),
 );
+
+function timeoutResult(promise, label, ms = ONBOARDING_REST_TIMEOUT_MS) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 async function ensureLanguageRole(guild, name, aliases = []) {
   let role = [name, ...aliases]
@@ -283,12 +292,21 @@ async function ensureNativeLanguageOnboarding(
   }
 
   const route = Routes.guildOnboarding(guild.id);
-  const existing = await guild.client.rest.get(route).catch(() => ({
-    prompts: [],
-    default_channel_ids: [],
-    enabled: false,
-    mode: 0,
-  }));
+  let existing;
+  try {
+    existing = await timeoutResult(
+      guild.client.rest.get(route),
+      'Discord onboarding GET',
+    );
+  } catch (error) {
+    console.warn(`[ONBOARDING] ${guild.name}: could not read current onboarding: ${error.message}`);
+    existing = {
+      prompts: [],
+      default_channel_ids: [],
+      enabled: false,
+      mode: 0,
+    };
+  }
 
   const existingLanguagePrompt = (existing.prompts || []).find(prompt => (
     prompt.title === LANGUAGE_PROMPT_TITLE
@@ -341,11 +359,30 @@ async function ensureNativeLanguageOnboarding(
     enabled: existing.enabled || canEnable,
   };
 
-  const result = await guild.client.rest.put(route, { body });
+  let result;
+  try {
+    result = await timeoutResult(
+      guild.client.rest.put(route, { body }),
+      'Discord onboarding PUT',
+    );
+  } catch (error) {
+    const cfg = db.guild(guild.id);
+    cfg.nativeOnboardingConfigured = false;
+    cfg.nativeOnboardingEnabled = false;
+    cfg.nativeOnboardingLastError = String(error.message || error).slice(0, 500);
+    db.save();
+    console.error(`[ONBOARDING] ${guild.name}: setup skipped without stopping the bot: ${error.message}`);
+    return {
+      enabled: false,
+      reason: 'discord_api_unavailable',
+      error: error.message,
+    };
+  }
 
   const cfg = db.guild(guild.id);
   cfg.nativeOnboardingConfigured = true;
   cfg.nativeOnboardingEnabled = Boolean(result.enabled);
+  cfg.nativeOnboardingLastError = null;
   cfg.russianRoleId = russianRole.id;
   cfg.englishRoleId = englishRole.id;
   db.save();
@@ -357,21 +394,40 @@ async function ensureNativeLanguageOnboarding(
 }
 
 async function ensureOnboardingInfrastructure(guild) {
-  await guild.roles.fetch();
-  await guild.channels.fetch();
+  try {
+    await guild.roles.fetch();
+    await guild.channels.fetch();
 
-  const russianRole = await ensureLanguageRole(guild, RUSSIAN_ROLE_NAME, ['Russian']);
-  const englishRole = await ensureLanguageRole(guild, ENGLISH_ROLE_NAME);
-  const rooms = await ensureLanguageVoiceRooms(guild, russianRole, englishRole);
-  const onboarding = await ensureNativeLanguageOnboarding(
-    guild,
-    russianRole,
-    englishRole,
-    rooms.russianChannels,
-    rooms.englishChannels,
-  );
+    const russianRole = await ensureLanguageRole(guild, RUSSIAN_ROLE_NAME, ['Russian']);
+    const englishRole = await ensureLanguageRole(guild, ENGLISH_ROLE_NAME);
+    const rooms = await ensureLanguageVoiceRooms(guild, russianRole, englishRole);
+    const onboarding = await ensureNativeLanguageOnboarding(
+      guild,
+      russianRole,
+      englishRole,
+      rooms.russianChannels,
+      rooms.englishChannels,
+    );
 
-  return { russianRole, englishRole, ...rooms, onboarding };
+    return { russianRole, englishRole, ...rooms, onboarding };
+  } catch (error) {
+    console.error(`[ONBOARDING] ${guild.name}: setup failed without stopping the bot: ${error.message}`);
+    const cfg = db.guild(guild.id);
+    cfg.nativeOnboardingConfigured = false;
+    cfg.nativeOnboardingEnabled = false;
+    cfg.nativeOnboardingLastError = String(error.message || error).slice(0, 500);
+    db.save();
+    return {
+      category: null,
+      russianChannels: [],
+      englishChannels: [],
+      onboarding: {
+        enabled: false,
+        reason: 'setup_failed',
+        error: error.message,
+      },
+    };
+  }
 }
 
 module.exports = {
