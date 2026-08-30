@@ -4,6 +4,7 @@ const { commands, donationPayload, trunc, duration, base } = require('./common')
 const { ensureInfrastructure, postPanel, supportModal, log } = require('./infra');
 const {
   ensureCommunityInfrastructure, applyHiddenRoleToChannel, syncHiddenMemberRoleChange,
+  handleLanguageInteraction, sendWelcomeNotification,
 } = require('./community');
 const {
   openTicket, claimTicket, closeTicket, addTicketMember, removeTicketMember, syncTicketAccess,
@@ -48,7 +49,7 @@ client.once(Events.ClientReady, async c => {
     if (TARGET && g.id !== TARGET) continue;
     try {
       await prepareGuild(g);
-      console.log(`[SETUP] Infrastructure, community info and ticket access ready in ${g.name}`);
+      console.log(`[SETUP] Infrastructure, onboarding and ticket access ready in ${g.name}`);
     } catch (e) {
       console.error(`[SETUP] ${g.name}`, e);
     }
@@ -65,6 +66,7 @@ client.on(Events.InteractionCreate, async i => {
     if (!i.inGuild()) return;
 
     if (i.isButton()) {
+      if (await handleLanguageInteraction(i)) return;
       if (i.customId === 'donate_show') return i.reply({ ...donationPayload(), ephemeral: true });
       if (i.customId === 'support_open') return i.showModal(supportModal());
       if (i.customId === 'ticket_close') return closeTicket(i);
@@ -90,7 +92,7 @@ client.on(Events.InteractionCreate, async i => {
       await ensureCommunityInfrastructure(i.guild, {
         supportChannelId: db.guild(i.guild.id).supportChannelId,
       });
-      return i.editReply('Support, community info and monitoring infrastructure is ready.');
+      return i.editReply('Support, onboarding, language roles/voice rooms and monitoring infrastructure are ready.');
     }
 
     if (i.commandName === 'support-panel') {
@@ -194,6 +196,8 @@ client.on(Events.GuildMemberAdd, async m => {
   const a = (joins.get(m.guild.id) || []).filter(x => now - x <= win);
   a.push(now);
   joins.set(m.guild.id, a);
+
+  await sendWelcomeNotification(m).catch(e => console.error('[WELCOME]', e));
   await log(m.guild, base('Member joined').addFields(
     { name: 'Member', value: `${m.user.tag} (${m.id})` },
     { name: 'Account age', value: `${Math.floor((now - m.user.createdTimestamp) / 86400000)} day(s)` },
