@@ -2,7 +2,9 @@ const { Client, Events, GatewayIntentBits, Partials } = require('discord.js');
 const db = require('./db');
 const { commands, donationPayload, trunc, duration, base } = require('./common');
 const { ensureInfrastructure, postPanel, supportModal, log } = require('./infra');
-const { ensureCommunityInfrastructure, applyHiddenRoleToChannel } = require('./community');
+const {
+  ensureCommunityInfrastructure, applyHiddenRoleToChannel, syncHiddenMemberRoleChange,
+} = require('./community');
 const {
   openTicket, claimTicket, closeTicket, addTicketMember, removeTicketMember, syncTicketAccess,
 } = require('./support');
@@ -194,6 +196,10 @@ client.on(Events.GuildMemberAdd, async m => {
   if (a.length >= c.raidThreshold) {
     await log(m.guild, base('Possible raid / join spike').setDescription(`**${a.length} joins** in **${c.raidWindowSeconds}s**.`));
   }
+});
+
+client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
+  await syncHiddenMemberRoleChange(oldMember, newMember).catch(e => console.error('[HIDDEN MEMBER]', e));
 });
 
 client.on(Events.GuildMemberRemove, m => {
