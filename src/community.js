@@ -1,4 +1,5 @@
 const { ChannelType, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const db = require('./db');
 
 const HIDDEN_ROLE_NAME = 'Hidden';
 const INFO_CATEGORY_NAME = 'INFO';
@@ -136,13 +137,108 @@ async function upsertBotEmbed(channel, title, payload) {
   return channel.send(payload);
 }
 
+function viewState(channel, memberId) {
+  const overwrite = channel.permissionOverwrites?.cache?.get(memberId);
+  if (!overwrite) return 'unset';
+  if (overwrite.allow.has(PermissionFlagsBits.ViewChannel)) return 'allow';
+  if (overwrite.deny.has(PermissionFlagsBits.ViewChannel)) return 'deny';
+  return 'unset';
+}
+
+function hiddenSnapshots(guild) {
+  const cfg = db.guild(guild.id);
+  cfg.hiddenAccessSnapshots ||= {};
+  return cfg.hiddenAccessSnapshots;
+}
+
+async function hideMemberFromChannel(member, channel, snapshots) {
+  if (!channel?.permissionOverwrites?.edit || channel.isThread?.()) return;
+  snapshots[channel.id] ??= viewState(channel, member.id);
+  await channel.permissionOverwrites.edit(member, { ViewChannel: false }, {
+    reason: 'LTT HELPER: member has Hidden role',
+  });
+}
+
+async function hideMemberEverywhere(member) {
+  if (!member?.guild || member.permissions.has(PermissionFlagsBits.Administrator)) return;
+  const guild = member.guild;
+  await guild.channels.fetch();
+  const allSnapshots = hiddenSnapshots(guild);
+  const snapshots = allSnapshots[member.id] ||= {};
+
+  for (const channel of guild.channels.cache.values()) {
+    await hideMemberFromChannel(member, channel, snapshots).catch(() => {});
+  }
+  db.save();
+}
+
+async function restoreMemberVisibility(member) {
+  if (!member?.guild) return;
+  const guild = member.guild;
+  const allSnapshots = hiddenSnapshots(guild);
+  const snapshots = allSnapshots[member.id];
+  if (!snapshots) return;
+
+  for (const [channelId, state] of Object.entries(snapshots)) {
+    const channel = guild.channels.cache.get(channelId) || await guild.channels.fetch(channelId).catch(() => null);
+    if (!channel?.permissionOverwrites?.edit || channel.isThread?.()) continue;
+    const value = state === 'allow' ? true : state === 'deny' ? false : null;
+    await channel.permissionOverwrites.edit(member, { ViewChannel: value }, {
+      reason: 'LTT HELPER: Hidden role removed; restore previous visibility',
+    }).catch(() => {});
+  }
+
+  delete allSnapshots[member.id];
+  db.save();
+}
+
+async function syncHiddenMemberRoleChange(oldMember, newMember) {
+  const hiddenRole = roleByName(newMember.guild, HIDDEN_ROLE_NAME);
+  if (!hiddenRole) return;
+  const hadRole = oldMember.roles.cache.has(hiddenRole.id);
+  const hasRole = newMember.roles.cache.has(hiddenRole.id);
+  if (hadRole === hasRole) return;
+
+  if (hasRole) await hideMemberEverywhere(newMember);
+  else await restoreMemberVisibility(newMember);
+}
+
+async function syncHiddenMembers(guild, hiddenRole) {
+  await guild.members.fetch();
+  const allSnapshots = hiddenSnapshots(guild);
+
+  for (const memberId of Object.keys(allSnapshots)) {
+    const member = guild.members.cache.get(memberId);
+    if (!member || !member.roles.cache.has(hiddenRole.id)) {
+      if (member) await restoreMemberVisibility(member);
+      else {
+        delete allSnapshots[memberId];
+        db.save();
+      }
+    }
+  }
+
+  for (const member of hiddenRole.members.values()) {
+    await hideMemberEverywhere(member);
+  }
+}
+
 async function applyHiddenRoleToChannel(channel, role = null) {
   if (!channel?.guild || channel.isThread?.() || !channel.permissionOverwrites?.edit) return;
   const hiddenRole = role || roleByName(channel.guild, HIDDEN_ROLE_NAME);
   if (!hiddenRole) return;
+
   await channel.permissionOverwrites.edit(hiddenRole, { ViewChannel: false }, {
     reason: 'LTT HELPER: Hidden role cannot view server channels',
   });
+
+  const allSnapshots = hiddenSnapshots(channel.guild);
+  for (const member of hiddenRole.members.values()) {
+    if (member.permissions.has(PermissionFlagsBits.Administrator)) continue;
+    const snapshots = allSnapshots[member.id] ||= {};
+    await hideMemberFromChannel(member, channel, snapshots).catch(() => {});
+  }
+  db.save();
 }
 
 async function applyHiddenRoleToAllChannels(guild, hiddenRole) {
@@ -176,6 +272,7 @@ async function ensureCommunityInfrastructure(guild, { supportChannelId = null } 
   await upsertBotEmbed(rules, 'Server Rules', rulesPayload());
   await upsertBotEmbed(faq, 'Frequently Asked Questions', faqPayload(supportChannelId));
   await applyHiddenRoleToAllChannels(guild, hiddenRole);
+  await syncHiddenMembers(guild, hiddenRole);
 
   return { hiddenRole, infoCategory, rules, faq };
 }
@@ -186,4 +283,5 @@ module.exports = {
   faqPayload,
   ensureCommunityInfrastructure,
   applyHiddenRoleToChannel,
+  syncHiddenMemberRoleChange,
 };
