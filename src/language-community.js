@@ -279,10 +279,9 @@ async function ensureLanguageCommunity(guild) {
 
   const ru = {};
   for (const [name, topic, readOnly] of RU_CHANNELS) {
-    const aliases = name === 'вопросы' ? ['faq'] : [];
     ru[name] = await migrateOrCreateChannel(
       guild, ruCategory, russianRole, englishRole, hiddenRole,
-      name, topic, readOnly, aliases, 'ru',
+      name, topic, readOnly, [], 'ru',
     );
   }
 
