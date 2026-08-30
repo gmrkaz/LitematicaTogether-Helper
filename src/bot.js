@@ -31,11 +31,15 @@ async function prepareGuild(guild, { forcePanel = false } = {}) {
   await guild.commands.set(commands);
   if (AUTO || forcePanel) {
     await ensureInfrastructure(guild, { forcePanel });
+    // Ticket access may add per-member ViewChannel allows. Apply Hidden last so its
+    // per-member deny is the final permission state on every parent channel.
+    await syncTicketAccess(guild);
     await ensureCommunityInfrastructure(guild, {
       supportChannelId: db.guild(guild.id).supportChannelId,
     });
+  } else {
+    await syncTicketAccess(guild);
   }
-  await syncTicketAccess(guild);
 }
 
 client.once(Events.ClientReady, async c => {
@@ -81,10 +85,11 @@ client.on(Events.InteractionCreate, async i => {
     if (i.commandName === 'setup-server') {
       await i.deferReply({ ephemeral: true });
       await ensureInfrastructure(i.guild, { forcePanel: true });
+      // Restore ticket permissions first, then enforce Hidden as the final state.
+      await syncTicketAccess(i.guild);
       await ensureCommunityInfrastructure(i.guild, {
         supportChannelId: db.guild(i.guild.id).supportChannelId,
       });
-      await syncTicketAccess(i.guild);
       return i.editReply('Support, community info and monitoring infrastructure is ready.');
     }
 
