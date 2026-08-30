@@ -8,6 +8,8 @@ const {
 } = require('./community');
 const { ensureOnboardingInfrastructure } = require('./onboarding');
 const { normalizeInternationalVoice } = require('./voice-layout');
+const { ensureRussianChannels } = require('./russian-channels');
+const { ensureLanguageCommunity } = require('./language-community');
 const { startModrinthWatcher } = require('./modrinth-watch');
 const {
   openTicket, claimTicket, closeTicket, addTicketMember, removeTicketMember, syncTicketAccess,
@@ -43,6 +45,10 @@ async function prepareGuild(guild, { forcePanel = false } = {}) {
     });
     await ensureOnboardingInfrastructure(guild);
     await normalizeInternationalVoice(guild);
+    await ensureRussianChannels(guild, {
+      supportChannelId: db.guild(guild.id).supportChannelId,
+    });
+    await ensureLanguageCommunity(guild);
   } else {
     await syncTicketAccess(guild);
   }
@@ -54,7 +60,7 @@ client.once(Events.ClientReady, async c => {
     if (TARGET && g.id !== TARGET) continue;
     try {
       await prepareGuild(g);
-      console.log(`[SETUP] Infrastructure, native onboarding and ticket access ready in ${g.name}`);
+      console.log(`[SETUP] Infrastructure, RU/GB community, native onboarding and ticket access ready in ${g.name}`);
     } catch (e) {
       console.error(`[SETUP] ${g.name}`, e);
     }
@@ -99,8 +105,12 @@ client.on(Events.InteractionCreate, async i => {
       });
       const onboarding = await ensureOnboardingInfrastructure(i.guild);
       await normalizeInternationalVoice(i.guild);
+      await ensureRussianChannels(i.guild, {
+        supportChannelId: db.guild(i.guild.id).supportChannelId,
+      });
+      await ensureLanguageCommunity(i.guild);
       const nativeState = onboarding.onboarding?.enabled ? 'enabled' : 'configured but not enabled';
-      return i.editReply(`Support, native language onboarding (${nativeState}), language voice rooms and monitoring infrastructure are ready.`);
+      return i.editReply(`Support, COMMUNITY RU/GB, separate language rules, native onboarding (${nativeState}), language voice rooms and monitoring infrastructure are ready.`);
     }
 
     if (i.commandName === 'support-panel') {
