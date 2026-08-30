@@ -1,3 +1,5 @@
+'use strict';
+
 const {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, EmbedBuilder, PermissionFlagsBits,
 } = require('discord.js');
@@ -6,12 +8,15 @@ const db = require('./db');
 const MODRINTH_PROJECT_SLUG = 'litematica-together';
 const MODRINTH_PROJECT_URL = 'https://modrinth.com/mod/litematica-together';
 const MODRINTH_API_BASE = 'https://api.modrinth.com/v2';
-const MOD_UPDATES_CHANNEL_NAME = 'mod-updates';
 const CHECK_INTERVAL_MS = Math.max(60_000, Number(process.env.MODRINTH_CHECK_INTERVAL_MS || 300_000));
 const FETCH_TIMEOUT_MS = Math.max(2_000, Number(process.env.MODRINTH_FETCH_TIMEOUT_MS || 8_000));
 const MAX_SEEN_IDS = 100;
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+function normalize(name) {
+  return String(name || '').toLowerCase().replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
 
 async function fetchJson(url) {
   const controller = new AbortController();
@@ -44,24 +49,32 @@ async function fetchVersions() {
     .sort((a, b) => new Date(a.date_published) - new Date(b.date_published));
 }
 
-function updatesOverwrites(guild, hiddenRole) {
-  const overwrites = [
-    {
-      id: guild.roles.everyone.id,
-      allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
-      deny: [
-        PermissionFlagsBits.SendMessages,
-        PermissionFlagsBits.SendMessagesInThreads,
-        PermissionFlagsBits.CreatePublicThreads,
-        PermissionFlagsBits.CreatePrivateThreads,
-      ],
-    },
-  ];
+function categoryByName(guild, name) {
+  const wanted = normalize(name);
+  return guild.channels.cache.find(channel => (
+    channel.type === ChannelType.GuildCategory && normalize(channel.name) === wanted
+  ));
+}
 
-  if (hiddenRole) {
-    overwrites.push({ id: hiddenRole.id, deny: [PermissionFlagsBits.ViewChannel] });
-  }
+function readOnlyOverwrites(guild, hiddenRole, languageRole = null) {
+  const overwrites = languageRole
+    ? [
+      { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+      {
+        id: languageRole.id,
+        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+        deny: [PermissionFlagsBits.SendMessages],
+      },
+    ]
+    : [
+      {
+        id: guild.roles.everyone.id,
+        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+        deny: [PermissionFlagsBits.SendMessages],
+      },
+    ];
 
+  if (hiddenRole) overwrites.push({ id: hiddenRole.id, deny: [PermissionFlagsBits.ViewChannel] });
   if (guild.members.me?.id) {
     overwrites.push({
       id: guild.members.me.id,
@@ -76,49 +89,72 @@ function updatesOverwrites(guild, hiddenRole) {
   return overwrites;
 }
 
-async function ensureUpdatesChannel(guild) {
+async function cleanupLegacyChannel(guild) {
+  const cfg = db.guild(guild.id);
+  if (!cfg.modUpdatesChannelId) return;
+  const channel = await guild.channels.fetch(cfg.modUpdatesChannelId).catch(() => null);
+  if (channel?.name === 'mod-updates') {
+    await channel.delete('LTT HELPER: PROJECT #updates already exists').catch(() => {});
+  }
+  delete cfg.modUpdatesChannelId;
+  db.save();
+}
+
+async function ensureUpdatesChannels(guild) {
   await guild.channels.fetch();
   await guild.roles.fetch();
+  await cleanupLegacyChannel(guild);
+
   const cfg = db.guild(guild.id);
+  const project = categoryByName(guild, 'PROJECT') || await guild.channels.create({
+    name: 'PROJECT',
+    type: ChannelType.GuildCategory,
+    reason: 'LTT HELPER: project information category',
+  });
+  const hiddenRole = guild.roles.cache.find(role => role.name === 'Hidden');
+  const russianRole = guild.roles.cache.find(role => ['Русский', 'Russian'].includes(role.name));
 
-  let channel = cfg.modUpdatesChannelId
-    ? await guild.channels.fetch(cfg.modUpdatesChannelId).catch(() => null)
+  let english = guild.channels.cache.find(channel => (
+    channel.parentId === project.id
+    && channel.name === 'updates'
+    && [ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(channel.type)
+  ));
+  if (!english) {
+    english = await guild.channels.create({
+      name: 'updates',
+      type: ChannelType.GuildText,
+      parent: project.id,
+      topic: 'Official Litematica Together release updates from Modrinth.',
+      permissionOverwrites: readOnlyOverwrites(guild, hiddenRole),
+      reason: 'LTT HELPER: missing PROJECT updates channel',
+    });
+  }
+
+  let russian = cfg.russianUpdatesChannelId
+    ? await guild.channels.fetch(cfg.russianUpdatesChannelId).catch(() => null)
     : null;
-
-  if (!channel) {
-    channel = guild.channels.cache.find(ch => (
-      ch.name === MOD_UPDATES_CHANNEL_NAME
-      && [ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(ch.type)
+  if (!russian) {
+    russian = guild.channels.cache.find(channel => (
+      channel.parentId === project.id
+      && channel.name === 'обновления'
+      && channel.type === ChannelType.GuildText
     ));
   }
-
-  const startHere = cfg.startHereCategoryId
-    ? await guild.channels.fetch(cfg.startHereCategoryId).catch(() => null)
-    : null;
-  const hiddenRole = guild.roles.cache.find(role => role.name === 'Hidden');
-  const permissionOverwrites = updatesOverwrites(guild, hiddenRole);
-
-  if (!channel) {
-    channel = await guild.channels.create({
-      name: MOD_UPDATES_CHANNEL_NAME,
+  if (!russian && russianRole) {
+    russian = await guild.channels.create({
+      name: 'обновления',
       type: ChannelType.GuildText,
-      parent: startHere?.type === ChannelType.GuildCategory ? startHere.id : null,
-      topic: 'Automatic Litematica Together releases and changelogs from Modrinth.',
-      permissionOverwrites,
-      reason: 'LTT HELPER: Modrinth release announcements',
+      parent: project.id,
+      topic: 'Автоматические новости о новых версиях Litematica Together на русском языке.',
+      permissionOverwrites: readOnlyOverwrites(guild, hiddenRole, russianRole),
+      reason: 'LTT HELPER: Russian PROJECT updates channel',
     });
-  } else {
-    if (startHere?.type === ChannelType.GuildCategory && channel.parentId !== startHere.id) {
-      await channel.setParent(startHere.id, { lockPermissions: false }).catch(() => {});
-    }
-    await channel.setTopic('Automatic Litematica Together releases and changelogs from Modrinth.').catch(() => {});
-    await channel.permissionOverwrites.set(permissionOverwrites).catch(() => {});
   }
 
-  await channel.setPosition(3).catch(() => {});
-  cfg.modUpdatesChannelId = channel.id;
+  cfg.projectUpdatesChannelId = english.id;
+  if (russian) cfg.russianUpdatesChannelId = russian.id;
   db.save();
-  return channel;
+  return { english, russian };
 }
 
 function trim(text, max = 3500) {
@@ -134,24 +170,49 @@ function list(values, max = 15) {
   return `${shown.join(', ')}${values.length > max ? ` +${values.length - max}` : ''}`;
 }
 
-function releasePayload(project, version, { current = false } = {}) {
+function releaseTypeRu(type) {
+  if (type === 'release') return 'Релиз';
+  if (type === 'beta') return 'Бета';
+  if (type === 'alpha') return 'Альфа';
+  return String(type || 'Релиз');
+}
+
+function releasePayload(project, version, { current = false, russian = false } = {}) {
   const published = Math.floor(new Date(version.date_published).getTime() / 1000);
   const versionUrl = `${MODRINTH_PROJECT_URL}/version/${version.id}`;
-  const title = current
-    ? `📦 Current Litematica Together release — ${version.version_number}`
-    : `🚀 New Litematica Together release — ${version.version_number}`;
+
+  const title = russian
+    ? (current
+      ? `📦 Текущая версия Litematica Together — ${version.version_number}`
+      : `🚀 Новая версия Litematica Together — ${version.version_number}`)
+    : (current
+      ? `📦 Current Litematica Together release — ${version.version_number}`
+      : `🚀 New Litematica Together release — ${version.version_number}`);
+
+  const changelog = trim(version.changelog);
+  const description = russian
+    ? `**Список изменений с Modrinth:**\n${changelog}`
+    : changelog;
 
   const embed = new EmbedBuilder()
     .setTitle(title)
     .setURL(versionUrl)
-    .setDescription(trim(version.changelog))
+    .setDescription(description)
     .addFields(
-      { name: 'Release type', value: String(version.version_type || 'release'), inline: true },
+      {
+        name: russian ? 'Тип версии' : 'Release type',
+        value: russian ? releaseTypeRu(version.version_type) : String(version.version_type || 'release'),
+        inline: true,
+      },
       { name: 'Minecraft', value: list(version.game_versions), inline: true },
-      { name: 'Loaders', value: list(version.loaders), inline: true },
-      { name: 'Published', value: Number.isFinite(published) ? `<t:${published}:F>\n<t:${published}:R>` : '—', inline: false },
+      { name: russian ? 'Загрузчики' : 'Loaders', value: list(version.loaders), inline: true },
+      {
+        name: russian ? 'Опубликовано' : 'Published',
+        value: Number.isFinite(published) ? `<t:${published}:F>\n<t:${published}:R>` : '—',
+        inline: false,
+      },
     )
-    .setFooter({ text: 'Source: Modrinth • Litematica Together' });
+    .setFooter({ text: russian ? 'Источник: Modrinth • Litematica Together' : 'Source: Modrinth • Litematica Together' });
 
   if (project?.icon_url) embed.setThumbnail(project.icon_url);
 
@@ -159,11 +220,11 @@ function releasePayload(project, version, { current = false } = {}) {
     embeds: [embed],
     components: [new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setLabel('Open on Modrinth')
+        .setLabel(russian ? 'Открыть версию на Modrinth' : 'Open on Modrinth')
         .setStyle(ButtonStyle.Link)
         .setURL(versionUrl),
       new ButtonBuilder()
-        .setLabel('Project page')
+        .setLabel(russian ? 'Страница проекта' : 'Project page')
         .setStyle(ButtonStyle.Link)
         .setURL(MODRINTH_PROJECT_URL),
     )],
@@ -171,23 +232,29 @@ function releasePayload(project, version, { current = false } = {}) {
   };
 }
 
-async function initializeState(guild, channel, project, versions) {
+async function seedCurrent(guild, channels, project, latest) {
   const cfg = db.guild(guild.id);
-  const currentIds = versions.map(version => version.id);
-  cfg.modrinthSeenVersionIds = currentIds.slice(-MAX_SEEN_IDS);
+  if (latest && !cfg.modrinthProjectUpdatesSeeded) {
+    await channels.english.send(releasePayload(project, latest, { current: true }));
+    cfg.modrinthProjectUpdatesSeeded = true;
+  }
+  if (latest && channels.russian && !cfg.modrinthRussianUpdatesSeeded) {
+    await channels.russian.send(releasePayload(project, latest, { current: true, russian: true }));
+    cfg.modrinthRussianUpdatesSeeded = true;
+  }
+  db.save();
+}
+
+async function initializeState(guild, channels, project, versions) {
+  const cfg = db.guild(guild.id);
+  cfg.modrinthSeenVersionIds = versions.map(version => version.id).slice(-MAX_SEEN_IDS);
   cfg.modrinthLastCheckAt = Date.now();
   db.save();
-
-  const latest = versions.at(-1);
-  if (latest && !cfg.modrinthInitialAnnouncementSent) {
-    await channel.send(releasePayload(project, latest, { current: true }));
-    cfg.modrinthInitialAnnouncementSent = true;
-    db.save();
-  }
+  await seedCurrent(guild, channels, project, versions.at(-1));
 }
 
 async function checkGuild(guild) {
-  const channel = await ensureUpdatesChannel(guild);
+  const channels = await ensureUpdatesChannels(guild);
   const [project, versions] = await Promise.all([fetchProject(), fetchVersions()]);
   if (!versions.length) return;
 
@@ -195,13 +262,18 @@ async function checkGuild(guild) {
   const seen = new Set(cfg.modrinthSeenVersionIds || []);
 
   if (!seen.size) {
-    await initializeState(guild, channel, project, versions);
+    await initializeState(guild, channels, project, versions);
     return;
   }
 
+  await seedCurrent(guild, channels, project, versions.at(-1));
+
   const fresh = versions.filter(version => !seen.has(version.id));
   for (const version of fresh) {
-    await channel.send(releasePayload(project, version));
+    await channels.english.send(releasePayload(project, version));
+    if (channels.russian) {
+      await channels.russian.send(releasePayload(project, version, { russian: true }));
+    }
     seen.add(version.id);
     await sleep(500);
   }
@@ -246,15 +318,14 @@ function startModrinthWatcher(client, targetGuildId = null) {
   }, CHECK_INTERVAL_MS);
   timer.unref?.();
 
-  console.log(`[MODRINTH] watching ${MODRINTH_PROJECT_URL} every ${Math.round(CHECK_INTERVAL_MS / 1000)}s`);
+  console.log(`[MODRINTH] watching ${MODRINTH_PROJECT_URL} -> PROJECT/#updates + #обновления every ${Math.round(CHECK_INTERVAL_MS / 1000)}s`);
   return timer;
 }
 
 module.exports = {
   MODRINTH_PROJECT_SLUG,
   MODRINTH_PROJECT_URL,
-  MOD_UPDATES_CHANNEL_NAME,
-  ensureUpdatesChannel,
+  ensureUpdatesChannels,
   checkGuild,
   startModrinthWatcher,
 };
