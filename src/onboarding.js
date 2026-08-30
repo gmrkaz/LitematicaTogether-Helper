@@ -14,7 +14,6 @@ const VOICE_LAYOUT = [
   { key: '2x2', ru: '🇷🇺 2x2', en: '🇬🇧 2x2' },
   { key: '3x3', ru: '🇷🇺 3x3', en: '🇬🇧 3x3' },
   { key: '5x5', ru: '🇷🇺 5x5', en: '🇬🇧 5x5' },
-  { key: 'international', ru: '🇷🇺 Международный', en: '🇬🇧 International' },
 ];
 
 const roleByName = (guild, name) => guild.roles.cache.find(
