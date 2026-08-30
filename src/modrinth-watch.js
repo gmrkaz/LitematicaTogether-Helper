@@ -4,7 +4,6 @@ const {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, EmbedBuilder, PermissionFlagsBits,
 } = require('discord.js');
 const db = require('./db');
-const { ensureRussianChannels } = require('./russian-channels');
 
 const MODRINTH_PROJECT_SLUG = 'litematica-together';
 const MODRINTH_PROJECT_URL = 'https://modrinth.com/mod/litematica-together';
@@ -255,10 +254,6 @@ async function initializeState(guild, channels, project, versions) {
 }
 
 async function checkGuild(guild) {
-  await ensureRussianChannels(guild, {
-    supportChannelId: db.guild(guild.id).supportChannelId,
-  });
-
   const channels = await ensureUpdatesChannels(guild);
   const [project, versions] = await Promise.all([fetchProject(), fetchVersions()]);
   if (!versions.length) return;
