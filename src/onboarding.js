@@ -5,12 +5,14 @@ const TARGET_VOICE_CATEGORY_ID = '1540936226570244217';
 const HIDDEN_ROLE_NAME = 'Hidden';
 const RUSSIAN_ROLE_NAME = 'Русский';
 const ENGLISH_ROLE_NAME = 'English';
-const LANGUAGE_PROMPT_TITLE = 'На каком языке вы говорите? / What language do you speak?';
+const LANGUAGE_PROMPT_TITLE = 'На русском или английском? / Russian or English?';
 
 const VOICE_LAYOUT = [
   { key: 'main', ru: '🇷🇺 Основной', en: '🇬🇧 Main' },
   { key: '1x1', ru: '🇷🇺 1x1', en: '🇬🇧 1x1' },
   { key: '2x2', ru: '🇷🇺 2x2', en: '🇬🇧 2x2' },
+  { key: '3x3', ru: '🇷🇺 3x3', en: '🇬🇧 3x3' },
+  { key: '5x5', ru: '🇷🇺 5x5', en: '🇬🇧 5x5' },
   { key: 'international', ru: '🇷🇺 Международный', en: '🇬🇧 International' },
 ];
 
@@ -112,13 +114,27 @@ async function cleanupLegacyVoiceCategory(guild, targetCategory) {
   }
 
   const oldCategoryId = cfg.languageVoiceCategoryId;
-  if (oldCategoryId && oldCategoryId !== targetCategory.id) {
-    const oldCategory = await guild.channels.fetch(oldCategoryId).catch(() => null);
-    if (oldCategory?.type === ChannelType.GuildCategory) {
-      const children = guild.channels.cache.filter(ch => ch.parentId === oldCategory.id);
-      if (!children.size) {
-        await oldCategory.delete('LTT HELPER: old language voice category no longer used').catch(() => {});
+  let oldCategory = oldCategoryId
+    ? await guild.channels.fetch(oldCategoryId).catch(() => null)
+    : null;
+
+  if (!oldCategory) {
+    oldCategory = guild.channels.cache.find(ch => (
+      ch.type === ChannelType.GuildCategory && ch.name.toUpperCase() === 'LANGUAGE VOICE'
+    ));
+  }
+
+  if (oldCategory && oldCategory.id !== targetCategory.id) {
+    const legacyNames = new Set(['Русский', 'English']);
+    const children = guild.channels.cache.filter(ch => ch.parentId === oldCategory.id);
+    for (const child of children.values()) {
+      if (child.type === ChannelType.GuildVoice && legacyNames.has(child.name)) {
+        await child.delete('LTT HELPER: remove legacy language voice room').catch(() => {});
       }
+    }
+    const left = guild.channels.cache.filter(ch => ch.parentId === oldCategory.id);
+    if (!left.size) {
+      await oldCategory.delete('LTT HELPER: old language voice category no longer used').catch(() => {});
     }
   }
 
@@ -228,6 +244,32 @@ function optionId(existingPrompt, title, offset) {
   return existing?.id || placeholderId(offset);
 }
 
+function serializeOption(option) {
+  const emoji = option.emoji || {};
+  return {
+    id: option.id,
+    title: option.title,
+    description: option.description ?? null,
+    emoji_id: option.emoji_id ?? emoji.id ?? null,
+    emoji_name: option.emoji_name ?? emoji.name ?? null,
+    emoji_animated: option.emoji_animated ?? emoji.animated ?? false,
+    role_ids: option.role_ids || [],
+    channel_ids: option.channel_ids || [],
+  };
+}
+
+function serializePrompt(prompt) {
+  return {
+    id: prompt.id,
+    type: prompt.type ?? 0,
+    title: prompt.title,
+    single_select: Boolean(prompt.single_select),
+    required: Boolean(prompt.required),
+    in_onboarding: Boolean(prompt.in_onboarding),
+    options: (prompt.options || []).map(serializeOption),
+  };
+}
+
 async function ensureNativeLanguageOnboarding(
   guild,
   russianRole,
@@ -250,6 +292,7 @@ async function ensureNativeLanguageOnboarding(
 
   const existingLanguagePrompt = (existing.prompts || []).find(prompt => (
     prompt.title === LANGUAGE_PROMPT_TITLE
+    || prompt.title === 'На каком языке вы говорите? / What language do you speak?'
     || prompt.options?.some(option => option.role_ids?.includes(russianRole.id) || option.role_ids?.includes(englishRole.id))
   ));
 
@@ -264,7 +307,7 @@ async function ensureNativeLanguageOnboarding(
       {
         id: optionId(existingLanguagePrompt, 'Русский', 2),
         title: 'Русский',
-        description: 'Русский интерфейс сообщества и русские голосовые комнаты',
+        description: 'Русская роль и русские голосовые комнаты',
         emoji_id: null,
         emoji_name: '🇷🇺',
         emoji_animated: false,
@@ -274,7 +317,7 @@ async function ensureNativeLanguageOnboarding(
       {
         id: optionId(existingLanguagePrompt, 'English', 3),
         title: 'English',
-        description: 'English community role and English voice rooms',
+        description: 'English role and English voice rooms',
         emoji_id: null,
         emoji_name: '🇬🇧',
         emoji_animated: false,
@@ -284,7 +327,9 @@ async function ensureNativeLanguageOnboarding(
     ],
   };
 
-  const prompts = (existing.prompts || []).filter(prompt => prompt.id !== existingLanguagePrompt?.id);
+  const prompts = (existing.prompts || [])
+    .filter(prompt => prompt.id !== existingLanguagePrompt?.id)
+    .map(serializePrompt);
   prompts.unshift(languagePrompt);
 
   const defaultChannels = collectDefaultChannels(guild, existing.default_channel_ids || []);
@@ -296,10 +341,7 @@ async function ensureNativeLanguageOnboarding(
     enabled: existing.enabled || canEnable,
   };
 
-  const result = await guild.client.rest.put(route, {
-    body,
-    reason: 'LTT HELPER: configure required Russian/English native onboarding',
-  });
+  const result = await guild.client.rest.put(route, { body });
 
   const cfg = db.guild(guild.id);
   cfg.nativeOnboardingConfigured = true;
