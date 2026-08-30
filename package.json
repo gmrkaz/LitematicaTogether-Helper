@@ -8,7 +8,7 @@
   "scripts": {
     "start": "node index.js",
     "start:owner-bot": "node owner-telegram-bot.js",
-    "check": "node --check index.js && node --check owner-telegram-bot.js && node --check src/index.js && node --check src/ltt-service.js && node --check src/bot.js && node --check src/common.js && node --check src/community.js && node --check src/db.js && node --check src/infra.js && node --check src/support.js && node --check src/escalation.js"
+    "check": "node --check index.js && node --check owner-telegram-bot.js && node --check src/index.js && node --check src/ltt-service.js && node --check src/bot.js && node --check src/common.js && node --check src/community.js && node --check src/onboarding.js && node --check src/db.js && node --check src/infra.js && node --check src/support.js && node --check src/escalation.js"
   },
   "engines": {
     "node": ">=20"
