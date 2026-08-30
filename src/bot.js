@@ -7,6 +7,8 @@ const {
   sendWelcomeNotification,
 } = require('./community');
 const { ensureOnboardingInfrastructure } = require('./onboarding');
+const { normalizeInternationalVoice } = require('./voice-layout');
+const { startModrinthWatcher } = require('./modrinth-watch');
 const {
   openTicket, claimTicket, closeTicket, addTicketMember, removeTicketMember, syncTicketAccess,
 } = require('./support');
@@ -40,6 +42,7 @@ async function prepareGuild(guild, { forcePanel = false } = {}) {
       supportChannelId: db.guild(guild.id).supportChannelId,
     });
     await ensureOnboardingInfrastructure(guild);
+    await normalizeInternationalVoice(guild);
   } else {
     await syncTicketAccess(guild);
   }
@@ -56,6 +59,7 @@ client.once(Events.ClientReady, async c => {
       console.error(`[SETUP] ${g.name}`, e);
     }
   }
+  startModrinthWatcher(c, TARGET);
 });
 
 client.on(Events.GuildCreate, async g => {
@@ -94,6 +98,7 @@ client.on(Events.InteractionCreate, async i => {
         supportChannelId: db.guild(i.guild.id).supportChannelId,
       });
       const onboarding = await ensureOnboardingInfrastructure(i.guild);
+      await normalizeInternationalVoice(i.guild);
       const nativeState = onboarding.onboarding?.enabled ? 'enabled' : 'configured but not enabled';
       return i.editReply(`Support, native language onboarding (${nativeState}), language voice rooms and monitoring infrastructure are ready.`);
     }
@@ -155,7 +160,7 @@ client.on(Events.InteractionCreate, async i => {
       const u = i.options.getUser('user', true);
       const m = await i.guild.members.fetch(u.id);
       await m.timeout(null, `Removed by ${i.user.tag}`);
-      return i.reply({ content: `Timeout removed from ${u.tag}.`, ephemeral: true });
+      await i.reply({ content: `Timeout removed from ${u.tag}.`, ephemeral: true });
     }
 
     if (i.commandName === 'purge') {
