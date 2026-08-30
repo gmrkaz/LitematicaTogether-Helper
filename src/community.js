@@ -1,6 +1,4 @@
-const {
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, EmbedBuilder, PermissionFlagsBits,
-} = require('discord.js');
+const { ChannelType, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const db = require('./db');
 
 const HIDDEN_ROLE_NAME = 'Hidden';
@@ -8,18 +6,8 @@ const START_HERE_CATEGORY_NAME = 'START HERE';
 const WELCOME_CHANNEL_NAME = 'welcome';
 const RULES_CHANNEL_NAME = 'rules';
 const FAQ_CHANNEL_NAME = 'faq';
-const LANGUAGE_VOICE_CATEGORY_NAME = 'LANGUAGE VOICE';
-const RUSSIAN_ROLE_NAME = 'Русский';
-const ENGLISH_ROLE_NAME = 'English';
-const RUSSIAN_ROLE_ALIASES = ['Русский', 'Russian'];
-const ENGLISH_ROLE_ALIASES = ['English'];
-const LANGUAGE_RU_BUTTON = 'language_ru';
-const LANGUAGE_EN_BUTTON = 'language_en';
 
 const roleByName = (guild, name) => guild.roles.cache.find(role => role.name === name);
-const roleByAliases = (guild, names) => guild.roles.cache.find(
-  role => names.some(name => role.name.toLowerCase() === name.toLowerCase()),
-);
 const channelByName = (guild, name, types = null) => guild.channels.cache.find(channel => (
   channel.name.toLowerCase() === name.toLowerCase() && (!types || types.includes(channel.type))
 ));
@@ -71,29 +59,16 @@ function faqPayload(supportChannelId = null) {
 function welcomePayload() {
   return {
     embeds: [new EmbedBuilder()
-      .setTitle('Choose your language / Выберите язык')
+      .setTitle('Welcome / Добро пожаловать')
       .setDescription([
-        '**First, choose the language you speak.**',
-        '**Сначала выберите язык, на котором вы разговариваете.**',
+        'Welcome to the Litematica Together community!',
+        'Добро пожаловать в сообщество Litematica Together!',
         '',
-        '🇷🇺 **Русский** — Russian role + Russian voice room.',
-        '🇬🇧 **English** — English role + English voice room.',
+        'Your language is selected in Discord\'s onboarding screen before you enter the server.',
+        'Язык выбирается во встроенном окне Discord до входа на сервер.',
         '',
-        'You can change your choice later by pressing the other button.',
-        'Позже язык можно сменить, просто нажав другую кнопку.',
+        'Please read **#rules** and check **#faq** if you have questions.',
       ].join('\n'))],
-    components: [new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(LANGUAGE_RU_BUTTON)
-        .setLabel('Русский')
-        .setEmoji('🇷🇺')
-        .setStyle(ButtonStyle.Primary),
-      new ButtonBuilder()
-        .setCustomId(LANGUAGE_EN_BUTTON)
-        .setLabel('English')
-        .setEmoji('🇬🇧')
-        .setStyle(ButtonStyle.Primary),
-    )],
     allowedMentions: { parse: [] },
   };
 }
@@ -107,20 +82,6 @@ async function ensureHiddenRole(guild) {
       hoist: false,
       mentionable: false,
       reason: 'LTT HELPER: role for hiding members from server channels',
-    });
-  }
-  return role;
-}
-
-async function ensureLanguageRole(guild, aliases, createName) {
-  let role = roleByAliases(guild, aliases);
-  if (!role) {
-    role = await guild.roles.create({
-      name: createName,
-      permissions: [],
-      hoist: false,
-      mentionable: false,
-      reason: 'LTT HELPER: language onboarding role',
     });
   }
   return role;
@@ -236,7 +197,7 @@ async function upsertWelcomeMessage(channel) {
     const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
     existing = recent?.find(message => (
       message.author.id === channel.client.user.id
-      && message.embeds.some(embed => embed.title === 'Choose your language / Выберите язык')
+      && message.embeds.some(embed => ['Welcome / Добро пожаловать', 'Choose your language / Выберите язык'].includes(embed.title))
     ));
   }
 
@@ -246,100 +207,8 @@ async function upsertWelcomeMessage(channel) {
   cfg.welcomeChannelId = channel.id;
   cfg.welcomeMessageId = existing.id;
   db.save();
-  await existing.pin('LTT HELPER: keep language selection at the top').catch(() => {});
+  await existing.pin('LTT HELPER: keep welcome information at the top').catch(() => {});
   return existing;
-}
-
-function languageCategoryOverwrites(guild, hiddenRole, russianRole, englishRole) {
-  return [
-    {
-      id: guild.roles.everyone.id,
-      deny: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect],
-    },
-    {
-      id: russianRole.id,
-      allow: [PermissionFlagsBits.ViewChannel],
-    },
-    {
-      id: englishRole.id,
-      allow: [PermissionFlagsBits.ViewChannel],
-    },
-    {
-      id: hiddenRole.id,
-      deny: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect],
-    },
-  ];
-}
-
-function languageVoiceOverwrites(guild, hiddenRole, languageRole) {
-  const overwrites = [
-    {
-      id: guild.roles.everyone.id,
-      deny: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect],
-    },
-    {
-      id: languageRole.id,
-      allow: [
-        PermissionFlagsBits.ViewChannel,
-        PermissionFlagsBits.Connect,
-        PermissionFlagsBits.Speak,
-        PermissionFlagsBits.Stream,
-        PermissionFlagsBits.UseVAD,
-        PermissionFlagsBits.SendMessages,
-        PermissionFlagsBits.ReadMessageHistory,
-        PermissionFlagsBits.AttachFiles,
-        PermissionFlagsBits.EmbedLinks,
-      ],
-    },
-    {
-      id: hiddenRole.id,
-      deny: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect],
-    },
-  ];
-
-  if (guild.members.me?.id) {
-    overwrites.push({
-      id: guild.members.me.id,
-      allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect],
-    });
-  }
-  return overwrites;
-}
-
-async function ensureLanguageVoiceCategory(guild, hiddenRole, russianRole, englishRole) {
-  let category = categoryByNames(guild, [LANGUAGE_VOICE_CATEGORY_NAME]);
-  const permissionOverwrites = languageCategoryOverwrites(guild, hiddenRole, russianRole, englishRole);
-
-  if (!category) {
-    category = await guild.channels.create({
-      name: LANGUAGE_VOICE_CATEGORY_NAME,
-      type: ChannelType.GuildCategory,
-      permissionOverwrites,
-      reason: 'LTT HELPER: language-specific voice rooms',
-    });
-  } else {
-    await category.permissionOverwrites.set(permissionOverwrites).catch(() => {});
-  }
-  return category;
-}
-
-async function ensureLanguageVoiceChannel(guild, category, hiddenRole, languageRole, name) {
-  let channel = channelByName(guild, name, [ChannelType.GuildVoice]);
-  const permissionOverwrites = languageVoiceOverwrites(guild, hiddenRole, languageRole);
-
-  if (!channel) {
-    channel = await guild.channels.create({
-      name,
-      type: ChannelType.GuildVoice,
-      parent: category.id,
-      permissionOverwrites,
-      reason: 'LTT HELPER: language-specific voice room',
-    });
-  } else {
-    await channel.setParent(category.id, { lockPermissions: false }).catch(() => {});
-    await channel.permissionOverwrites.set(permissionOverwrites).catch(() => {});
-  }
-  return channel;
 }
 
 function viewState(channel, memberId) {
@@ -453,36 +322,6 @@ async function applyHiddenRoleToAllChannels(guild, hiddenRole) {
   }
 }
 
-async function handleLanguageInteraction(interaction) {
-  if (!interaction.inGuild() || !interaction.isButton()) return false;
-  const isRussian = interaction.customId === LANGUAGE_RU_BUTTON;
-  const isEnglish = interaction.customId === LANGUAGE_EN_BUTTON;
-  if (!isRussian && !isEnglish) return false;
-
-  await interaction.guild.roles.fetch();
-  const russianRole = await ensureLanguageRole(interaction.guild, RUSSIAN_ROLE_ALIASES, RUSSIAN_ROLE_NAME);
-  const englishRole = await ensureLanguageRole(interaction.guild, ENGLISH_ROLE_ALIASES, ENGLISH_ROLE_NAME);
-  const member = await interaction.guild.members.fetch(interaction.user.id);
-
-  const selectedRole = isRussian ? russianRole : englishRole;
-  const otherRole = isRussian ? englishRole : russianRole;
-
-  if (member.roles.cache.has(otherRole.id)) {
-    await member.roles.remove(otherRole, 'LTT HELPER: language changed');
-  }
-  if (!member.roles.cache.has(selectedRole.id)) {
-    await member.roles.add(selectedRole, 'LTT HELPER: language selected');
-  }
-
-  await interaction.reply({
-    content: isRussian
-      ? '🇷🇺 Язык выбран: **Русский**. Вам открыт русский голосовой канал.'
-      : '🇬🇧 Language selected: **English**. The English voice room is now available.',
-    ephemeral: true,
-  });
-  return true;
-}
-
 async function sendWelcomeNotification(member) {
   if (!member?.guild || member.user?.bot) return;
   const cfg = db.guild(member.guild.id);
@@ -493,7 +332,7 @@ async function sendWelcomeNotification(member) {
   if (!channel?.isTextBased()) return;
 
   await channel.send({
-    content: `👋 <@${member.id}> Welcome! / Добро пожаловать!\nChoose **Русский** or **English** using the buttons in the message above. / Выберите **Русский** или **English** кнопками в сообщении выше.`,
+    content: `👋 <@${member.id}> Welcome! / Добро пожаловать!`,
     allowedMentions: { users: [member.id] },
   }).catch(() => {});
 }
@@ -503,16 +342,13 @@ async function ensureCommunityInfrastructure(guild, { supportChannelId = null } 
   await guild.channels.fetch();
 
   const hiddenRole = await ensureHiddenRole(guild);
-  const russianRole = await ensureLanguageRole(guild, RUSSIAN_ROLE_ALIASES, RUSSIAN_ROLE_NAME);
-  const englishRole = await ensureLanguageRole(guild, ENGLISH_ROLE_ALIASES, ENGLISH_ROLE_NAME);
-
   const startHere = await ensureStartHereCategory(guild, hiddenRole);
   const welcome = await ensureReadOnlyChannel(
     guild,
     startHere,
     hiddenRole,
     WELCOME_CHANNEL_NAME,
-    'Start here: choose Russian or English to receive the matching language role.',
+    'Welcome information. Language selection happens in Discord onboarding before joining.',
   );
   const rules = await ensureReadOnlyChannel(
     guild,
@@ -537,57 +373,17 @@ async function ensureCommunityInfrastructure(guild, { supportChannelId = null } 
   await upsertBotEmbed(rules, 'Server Rules', rulesPayload());
   await upsertBotEmbed(faq, 'Frequently Asked Questions', faqPayload(supportChannelId));
 
-  const voiceCategory = await ensureLanguageVoiceCategory(
-    guild,
-    hiddenRole,
-    russianRole,
-    englishRole,
-  );
-  const russianVoice = await ensureLanguageVoiceChannel(
-    guild,
-    voiceCategory,
-    hiddenRole,
-    russianRole,
-    'Русский',
-  );
-  const englishVoice = await ensureLanguageVoiceChannel(
-    guild,
-    voiceCategory,
-    hiddenRole,
-    englishRole,
-    'English',
-  );
-
-  await russianVoice.setPosition(0).catch(() => {});
-  await englishVoice.setPosition(1).catch(() => {});
-
   const cfg = db.guild(guild.id);
   Object.assign(cfg, {
     startHereCategoryId: startHere.id,
     welcomeChannelId: welcome.id,
-    russianRoleId: russianRole.id,
-    englishRoleId: englishRole.id,
-    languageVoiceCategoryId: voiceCategory.id,
-    russianVoiceChannelId: russianVoice.id,
-    englishVoiceChannelId: englishVoice.id,
   });
   db.save();
 
   await applyHiddenRoleToAllChannels(guild, hiddenRole);
   await syncHiddenMembers(guild, hiddenRole);
 
-  return {
-    hiddenRole,
-    russianRole,
-    englishRole,
-    startHere,
-    welcome,
-    rules,
-    faq,
-    voiceCategory,
-    russianVoice,
-    englishVoice,
-  };
+  return { hiddenRole, startHere, welcome, rules, faq };
 }
 
 module.exports = {
@@ -598,6 +394,5 @@ module.exports = {
   ensureCommunityInfrastructure,
   applyHiddenRoleToChannel,
   syncHiddenMemberRoleChange,
-  handleLanguageInteraction,
   sendWelcomeNotification,
 };
