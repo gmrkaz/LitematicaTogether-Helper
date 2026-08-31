@@ -10,6 +10,7 @@ const { ensureOnboardingInfrastructure } = require('./onboarding');
 const { normalizeInternationalVoice } = require('./voice-layout');
 const { ensureLanguageCommunity } = require('./language-community');
 const { cleanupGithubChannels } = require('./channel-cleanup');
+const { cleanupLegacyCommunity } = require('./legacy-community-cleanup');
 const {
   ensureProjectInfrastructure, projectSupportModal, styleSupportPanel,
 } = require('./project-layout');
@@ -47,6 +48,7 @@ async function prepareGuild(guild, { forcePanel = false } = {}) {
     await ensureOnboardingInfrastructure(guild);
     await normalizeInternationalVoice(guild);
     await ensureLanguageCommunity(guild);
+    await cleanupLegacyCommunity(guild);
     await cleanupGithubChannels(guild);
     await ensureProjectInfrastructure(guild);
   } else {
@@ -110,10 +112,11 @@ client.on(Events.InteractionCreate, async i => {
       const onboarding = await ensureOnboardingInfrastructure(i.guild);
       await normalizeInternationalVoice(i.guild);
       await ensureLanguageCommunity(i.guild);
+      await cleanupLegacyCommunity(i.guild);
       await cleanupGithubChannels(i.guild);
       await ensureProjectInfrastructure(i.guild);
       const nativeState = onboarding.onboarding?.enabled ? 'enabled' : 'configured but not enabled';
-      return i.editReply(`Litematica Together + Simple Translator, COMMUNITY RU/GB, separate project RU/GB sections, Support, native onboarding (${nativeState}), language voice rooms and monitoring are ready.`);
+      return i.editReply(`Litematica Together + Simple Translator, COMMUNITY RU/GB, project sections, Support, native onboarding (${nativeState}), language voice rooms and monitoring are ready.`);
     }
 
     if (i.commandName === 'support-panel') {
