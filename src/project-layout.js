@@ -141,7 +141,15 @@ async function ensureCategory(guild, name, selectedRole, otherRole, hiddenRole) 
   return category;
 }
 
-async function ensureProjectChannel(guild, category, selectedRole, otherRole, hiddenRole, spec) {
+async function ensureProjectChannel(
+  guild,
+  category,
+  selectedRole,
+  otherRole,
+  hiddenRole,
+  spec,
+  legacyProjectCategoryId = null,
+) {
   const [name, topic, readOnly, aliases] = spec;
   const names = new Set([name, ...(aliases || [])].map(normalize));
 
@@ -149,12 +157,14 @@ async function ensureProjectChannel(guild, category, selectedRole, otherRole, hi
     ch.type === ChannelType.GuildText && ch.parentId === category.id && names.has(normalize(ch.name))
   ));
 
-  if (!channel && aliases?.length) {
+  // Legacy migration is deliberately limited to the old PROJECT category.
+  // New Litematica Together and Simple Translator categories can never steal
+  // identically named channels from one another on later setup runs.
+  if (!channel && legacyProjectCategoryId && aliases?.length) {
     channel = guild.channels.cache.find(ch => (
       ch.type === ChannelType.GuildText
-      && ch.parentId !== category.id
+      && ch.parentId === legacyProjectCategoryId
       && names.has(normalize(ch.name))
-      && !['COMMUNITY RU', 'COMMUNITY GB'].includes(ch.parent?.name)
     ));
     if (channel) {
       await channel.setParent(category.id, { lockPermissions: false }).catch(() => {});
@@ -237,7 +247,15 @@ async function upsertMarker(channel, marker, payload) {
   return channel.send(payload);
 }
 
-async function ensureProjectBranch(guild, project, language, selectedRole, otherRole, hiddenRole) {
+async function ensureProjectBranch(
+  guild,
+  project,
+  language,
+  selectedRole,
+  otherRole,
+  hiddenRole,
+  legacyProjectCategoryId = null,
+) {
   const russian = language === 'ru';
   const category = await ensureCategory(
     guild,
@@ -250,7 +268,13 @@ async function ensureProjectBranch(guild, project, language, selectedRole, other
   const channels = {};
   for (const spec of specs) {
     channels[spec[0]] = await ensureProjectChannel(
-      guild, category, selectedRole, otherRole, hiddenRole, spec,
+      guild,
+      category,
+      selectedRole,
+      otherRole,
+      hiddenRole,
+      spec,
+      legacyProjectCategoryId,
     );
   }
   const aboutName = russian ? 'о-моде' : 'about-mod';
@@ -504,10 +528,21 @@ async function ensureProjectInfrastructure(guild) {
     return null;
   }
 
-  const lttRu = await ensureProjectBranch(guild, PROJECTS.ltt, 'ru', russianRole, englishRole, hiddenRole);
-  const lttGb = await ensureProjectBranch(guild, PROJECTS.ltt, 'gb', englishRole, russianRole, hiddenRole);
-  const stRu = await ensureProjectBranch(guild, PROJECTS.simpleTranslator, 'ru', russianRole, englishRole, hiddenRole);
-  const stGb = await ensureProjectBranch(guild, PROJECTS.simpleTranslator, 'gb', englishRole, russianRole, hiddenRole);
+  const legacyProject = categoryByName(guild, 'PROJECT');
+  const legacyProjectCategoryId = legacyProject?.id || null;
+
+  const lttRu = await ensureProjectBranch(
+    guild, PROJECTS.ltt, 'ru', russianRole, englishRole, hiddenRole, legacyProjectCategoryId,
+  );
+  const lttGb = await ensureProjectBranch(
+    guild, PROJECTS.ltt, 'gb', englishRole, russianRole, hiddenRole, legacyProjectCategoryId,
+  );
+  const stRu = await ensureProjectBranch(
+    guild, PROJECTS.simpleTranslator, 'ru', russianRole, englishRole, hiddenRole,
+  );
+  const stGb = await ensureProjectBranch(
+    guild, PROJECTS.simpleTranslator, 'gb', englishRole, russianRole, hiddenRole,
+  );
 
   await ensureProjectsOverview(guild, hiddenRole);
   await refreshWelcome(guild);
