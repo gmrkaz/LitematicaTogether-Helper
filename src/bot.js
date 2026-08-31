@@ -1,15 +1,18 @@
 const { Client, Events, GatewayIntentBits, Partials } = require('discord.js');
 const db = require('./db');
 const { commands, donationPayload, trunc, duration, base } = require('./common');
-const { ensureInfrastructure, postPanel, supportModal, log } = require('./infra');
+const { ensureInfrastructure, postPanel, log } = require('./infra');
 const {
   ensureCommunityInfrastructure, applyHiddenRoleToChannel, syncHiddenMemberRoleChange,
   sendWelcomeNotification,
 } = require('./community');
 const { ensureOnboardingInfrastructure } = require('./onboarding');
 const { normalizeInternationalVoice } = require('./voice-layout');
-const { ensureRussianChannels } = require('./russian-channels');
 const { ensureLanguageCommunity } = require('./language-community');
+const { cleanupGithubChannels } = require('./channel-cleanup');
+const {
+  ensureProjectInfrastructure, projectSupportModal, styleSupportPanel,
+} = require('./project-layout');
 const { startModrinthWatcher } = require('./modrinth-watch');
 const {
   openTicket, claimTicket, closeTicket, addTicketMember, removeTicketMember, syncTicketAccess,
@@ -37,18 +40,15 @@ async function prepareGuild(guild, { forcePanel = false } = {}) {
   await guild.commands.set(commands);
   if (AUTO || forcePanel) {
     await ensureInfrastructure(guild, { forcePanel });
-    // Ticket access may add per-member ViewChannel allows. Apply Hidden last so its
-    // per-member deny is the final permission state on every parent channel.
     await syncTicketAccess(guild);
     await ensureCommunityInfrastructure(guild, {
       supportChannelId: db.guild(guild.id).supportChannelId,
     });
     await ensureOnboardingInfrastructure(guild);
     await normalizeInternationalVoice(guild);
-    await ensureRussianChannels(guild, {
-      supportChannelId: db.guild(guild.id).supportChannelId,
-    });
     await ensureLanguageCommunity(guild);
+    await cleanupGithubChannels(guild);
+    await ensureProjectInfrastructure(guild);
   } else {
     await syncTicketAccess(guild);
   }
@@ -60,7 +60,7 @@ client.once(Events.ClientReady, async c => {
     if (TARGET && g.id !== TARGET) continue;
     try {
       await prepareGuild(g);
-      console.log(`[SETUP] Infrastructure, RU/GB community, native onboarding and ticket access ready in ${g.name}`);
+      console.log(`[SETUP] Dual-mod infrastructure, RU/GB community, projects, onboarding and ticket access ready in ${g.name}`);
     } catch (e) {
       console.error(`[SETUP] ${g.name}`, e);
     }
@@ -79,7 +79,12 @@ client.on(Events.InteractionCreate, async i => {
 
     if (i.isButton()) {
       if (i.customId === 'donate_show') return i.reply({ ...donationPayload(), ephemeral: true });
-      if (i.customId === 'support_open') return i.showModal(supportModal());
+      if (i.customId === 'support_open' || i.customId === 'support_open_ltt') {
+        return i.showModal(projectSupportModal('ltt'));
+      }
+      if (i.customId === 'support_open_st') {
+        return i.showModal(projectSupportModal('simpleTranslator'));
+      }
       if (i.customId === 'ticket_close') return closeTicket(i);
       if (i.customId === 'ticket_claim') return claimTicket(i);
     }
@@ -90,7 +95,7 @@ client.on(Events.InteractionCreate, async i => {
     if (i.commandName === 'donate') return i.reply(donationPayload());
     if (i.commandName === 'status') {
       return i.reply({
-        content: `HELPER is online.\nUptime: ${Math.floor(process.uptime())}s\nOpen tickets: ${Object.values(db.data.tickets).filter(t => t.guildId === i.guild.id && t.status === 'open').length}`,
+        content: `HELPER is online.\nProjects: Litematica Together + Simple Translator\nUptime: ${Math.floor(process.uptime())}s\nOpen tickets: ${Object.values(db.data.tickets).filter(t => t.guildId === i.guild.id && t.status === 'open').length}`,
         ephemeral: true,
       });
     }
@@ -98,26 +103,25 @@ client.on(Events.InteractionCreate, async i => {
     if (i.commandName === 'setup-server') {
       await i.deferReply({ ephemeral: true });
       await ensureInfrastructure(i.guild, { forcePanel: true });
-      // Restore ticket permissions first, then enforce Hidden as the final state.
       await syncTicketAccess(i.guild);
       await ensureCommunityInfrastructure(i.guild, {
         supportChannelId: db.guild(i.guild.id).supportChannelId,
       });
       const onboarding = await ensureOnboardingInfrastructure(i.guild);
       await normalizeInternationalVoice(i.guild);
-      await ensureRussianChannels(i.guild, {
-        supportChannelId: db.guild(i.guild.id).supportChannelId,
-      });
       await ensureLanguageCommunity(i.guild);
+      await cleanupGithubChannels(i.guild);
+      await ensureProjectInfrastructure(i.guild);
       const nativeState = onboarding.onboarding?.enabled ? 'enabled' : 'configured but not enabled';
-      return i.editReply(`Support, COMMUNITY RU/GB, separate language rules, native onboarding (${nativeState}), language voice rooms and monitoring infrastructure are ready.`);
+      return i.editReply(`Litematica Together + Simple Translator, COMMUNITY RU/GB, separate project RU/GB sections, Support, native onboarding (${nativeState}), language voice rooms and monitoring are ready.`);
     }
 
     if (i.commandName === 'support-panel') {
       const ch = await i.guild.channels.fetch(db.guild(i.guild.id).supportChannelId).catch(() => null);
       if (!ch) return i.reply({ content: 'Run /setup-server first.', ephemeral: true });
       await postPanel(ch);
-      return i.reply({ content: 'Support panel posted.', ephemeral: true });
+      await styleSupportPanel(i.guild);
+      return i.reply({ content: 'Dual-project Support panel posted.', ephemeral: true });
     }
 
     if (i.commandName === 'ticket-close') return closeTicket(i);
