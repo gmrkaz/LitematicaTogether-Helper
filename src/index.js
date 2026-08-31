@@ -2,6 +2,8 @@
 
 // Install ticket escalation handlers before the Discord client logs in.
 require('./escalation').installEscalationHook();
+// Apply Discord Enhanced Role Styles as soon as the client becomes ready.
+require('./role-styles').installRoleStylesHook();
 
 // Discord HELPER stays in the main process. The Litematica Together relay runs
 // separately, so a relay crash or memory spike cannot intentionally terminate
