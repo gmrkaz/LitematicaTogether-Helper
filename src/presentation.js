@@ -6,6 +6,7 @@ const {
   ButtonStyle,
   ChannelType,
   EmbedBuilder,
+  PermissionFlagsBits,
 } = require('discord.js');
 const db = require('./db');
 
@@ -85,6 +86,32 @@ async function upsert(channel, marker, payload, { oldTitles = [], pin = true } =
   return message;
 }
 
+function readOnlyOverwrites(guild) {
+  const hidden = guild.roles.cache.find(role => role.name === 'Hidden');
+  const result = [{
+    id: guild.roles.everyone.id,
+    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+    deny: [
+      PermissionFlagsBits.SendMessages,
+      PermissionFlagsBits.SendMessagesInThreads,
+      PermissionFlagsBits.CreatePublicThreads,
+      PermissionFlagsBits.CreatePrivateThreads,
+    ],
+  }];
+  if (hidden) result.push({ id: hidden.id, deny: [PermissionFlagsBits.ViewChannel] });
+  if (guild.members.me?.id) result.push({
+    id: guild.members.me.id,
+    allow: [
+      PermissionFlagsBits.ViewChannel,
+      PermissionFlagsBits.ReadMessageHistory,
+      PermissionFlagsBits.SendMessages,
+      PermissionFlagsBits.EmbedLinks,
+      PermissionFlagsBits.ManageMessages,
+    ],
+  });
+  return result;
+}
+
 async function ensureProjectsChannel(guild) {
   const startHere = categoryByName(guild, 'START HERE');
   if (!startHere) return null;
@@ -95,8 +122,13 @@ async function ensureProjectsChannel(guild) {
       type: ChannelType.GuildText,
       parent: startHere.id,
       topic: 'Litematica Together + Simple Translator — project navigation.',
+      permissionOverwrites: readOnlyOverwrites(guild),
       reason: 'MODS HUB: projects overview',
     }).catch(() => null);
+  } else {
+    await channel.setParent(startHere.id, { lockPermissions: false }).catch(() => {});
+    await channel.permissionOverwrites.set(readOnlyOverwrites(guild)).catch(() => {});
+    await channel.setTopic('Litematica Together + Simple Translator — project navigation.').catch(() => {});
   }
   return channel;
 }
@@ -112,6 +144,11 @@ async function styleStartHere(guild) {
   const support = cfg.supportChannelId
     ? await guild.channels.fetch(cfg.supportChannelId).catch(() => null)
     : guild.channels.cache.find(ch => ch.type === ChannelType.GuildText && ch.name === 'support');
+
+  const ordered = [welcome, projects, announcements, downloads, rules, faq].filter(Boolean);
+  for (let index = 0; index < ordered.length; index += 1) {
+    await ordered[index].setPosition(index).catch(() => {});
+  }
 
   if (welcome) {
     const marker = 'MODS-HUB:WELCOME:PRETTY-V1';
@@ -229,7 +266,6 @@ const COMMUNITY_GUIDES = {
   'COMMUNITY RU': {
     color: COLORS.ru,
     channels: {
-      правила: ['📜 Правила сообщества', 'Главные правила сервера. Прочитайте их перед общением — коротко, понятно и без лишней бюрократии.'],
       общий: ['💬 Общий чат', 'Русскоязычное общение сообщества обоих модов. Технические проблемы лучше отправлять в Support.'],
       вопросы: ['❓ Вопросы', 'Короткие общие вопросы о сервере и модах. Для багов, логов и установки используйте Support.'],
       медиа: ['🎬 Медиа', 'Скриншоты, видео, клипы, красивые сборки и другой контент сообщества.'],
@@ -239,7 +275,6 @@ const COMMUNITY_GUIDES = {
   'COMMUNITY GB': {
     color: COLORS.gb,
     channels: {
-      rules: ['📜 Community Rules', 'The main server rules — short, clear and practical.'],
       general: ['💬 General', 'General English-speaking chat for both mod communities. Use Support for technical problems.'],
       questions: ['❓ Questions', 'Quick questions about the server or mods. Use Support for bugs, logs and installation help.'],
       media: ['🎬 Media', 'Screenshots, videos, clips, builds and other community content.'],
@@ -252,22 +287,69 @@ const COMMUNITY_GUIDES = {
   },
 };
 
+function ruRulesEmbed(guild) {
+  return brandEmbed(
+    guild,
+    'Правила сервера',
+    '📜 Короткая версия: поддерживаем сервер чистым, уважительным и по теме **Litematica Together** и **Simple Translator**.',
+    COLORS.ru,
+  )
+    .addFields(
+      { name: '🚫 1. Без конфликтного IRL-оффтопа', value: 'Политика, религия и другие темы, не относящиеся к серверу и легко вызывающие срачи, здесь не нужны.' },
+      { name: '🧹 2. Без спама и жести', value: 'Не превращайте сервер в поток мем-спама, шок-контента и намеренных провокаций.' },
+      { name: '🤝 3. Уважайте людей', value: 'Оскорбления, травля, унижение и личные нападки запрещены.' },
+      { name: '🧭 4. Используйте каналы по назначению', value: 'Общие темы — в COMMUNITY, вопросы по конкретному моду — в его категории, технические проблемы — в Support.' },
+      { name: '🛡️ 5. Не мешайте серверу и проектам', value: 'Рейды, вредоносные файлы, намеренная дезинформация и обход модерации запрещены.' },
+      { name: '⚖️ Модерация', value: 'Если модератор просит прекратить конфликт или перенести обсуждение — выполните просьбу.' },
+    )
+    .setFooter({ text: 'LTT-COMMUNITY-RU:RULES' });
+}
+
+function gbRulesEmbed(guild) {
+  return brandEmbed(
+    guild,
+    'Server Rules',
+    '📜 Simple version: keep the server clean, respectful and on topic for **Litematica Together** and **Simple Translator**.',
+    COLORS.gb,
+  )
+    .addFields(
+      { name: '🚫 1. No conflict-heavy IRL topics', value: 'Politics, religion and unrelated topics likely to create drama do not belong here.' },
+      { name: '🧹 2. No spam or disturbing content', value: 'Do not turn the server into meme spam, shock content or deliberate provocation.' },
+      { name: '🤝 3. Respect people', value: 'Harassment, insults, humiliation and personal attacks are prohibited.' },
+      { name: '🧭 4. Use the correct channels', value: 'General topics belong in COMMUNITY, mod-specific topics in the mod category, technical problems in Support.' },
+      { name: '🛡️ 5. Do not disrupt the server or projects', value: 'Raids, malicious files, deliberate misinformation and moderation evasion are prohibited.' },
+      { name: '⚖️ Moderation', value: 'If a moderator asks you to stop a conflict or move a discussion, follow that request.' },
+    )
+    .setFooter({ text: 'LTT-COMMUNITY-GB:RULES' });
+}
+
 async function styleCommunity(guild) {
   const cfg = db.guild(guild.id);
   const support = cfg.supportChannelId ? await guild.channels.fetch(cfg.supportChannelId).catch(() => null) : null;
+
+  const ruRules = textChannel(guild, 'COMMUNITY RU', 'правила');
+  if (ruRules) {
+    await upsert(ruRules, 'LTT-COMMUNITY-RU:RULES', {
+      embeds: [ruRulesEmbed(guild)],
+      allowedMentions: { parse: [] },
+    }, { oldTitles: ['Правила сервера'] });
+  }
+
+  const gbRules = textChannel(guild, 'COMMUNITY GB', 'rules');
+  if (gbRules) {
+    await upsert(gbRules, 'LTT-COMMUNITY-GB:RULES', {
+      embeds: [gbRulesEmbed(guild)],
+      allowedMentions: { parse: [] },
+    }, { oldTitles: ['Server Rules'] });
+  }
+
   for (const [categoryName, def] of Object.entries(COMMUNITY_GUIDES)) {
     for (const [name, [title, description]] of Object.entries(def.channels)) {
       const channel = textChannel(guild, categoryName, name);
       if (!channel) continue;
       await channel.setTopic(description).catch(() => {});
-      const isRules = name === 'правила' || name === 'rules';
-      const marker = name === 'правила'
-        ? 'LTT-COMMUNITY-RU:RULES'
-        : name === 'rules'
-          ? 'LTT-COMMUNITY-GB:RULES'
-          : `MODS-HUB:COMMUNITY:${categoryName.endsWith('RU') ? 'RU' : 'GB'}:${name}:PRETTY-V1`;
-      const embedTitle = name === 'правила' ? 'Правила сервера' : name === 'rules' ? 'Server Rules' : title;
-      const embed = brandEmbed(guild, embedTitle, description, def.color).setFooter({ text: marker });
+      const marker = `MODS-HUB:COMMUNITY:${categoryName.endsWith('RU') ? 'RU' : 'GB'}:${name}:PRETTY-V1`;
+      const embed = brandEmbed(guild, title, description, def.color).setFooter({ text: marker });
       if (['вопросы', 'questions'].includes(name) && support) {
         embed.addFields({
           name: categoryName.endsWith('RU') ? '🛟 Нужна техническая помощь?' : '🛟 Need technical help?',
@@ -278,7 +360,7 @@ async function styleCommunity(guild) {
         embeds: [embed],
         components: ['вопросы', 'questions'].includes(name) ? rows(linkButton('Support', discordChannelUrl(guild, support), '🛟')) : [],
         allowedMentions: { parse: [] },
-      }, { oldTitles: isRules ? [embedTitle] : [] });
+      });
     }
   }
 }
@@ -373,6 +455,7 @@ async function styleProject(guild, categoryName, projectName, color, key) {
 }
 
 async function ensurePresentation(guild) {
+  await guild.roles.fetch();
   await guild.channels.fetch();
   await styleStartHere(guild);
   await styleCommunity(guild);
