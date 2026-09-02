@@ -61,7 +61,8 @@ async function styleSupportPanel(guild) {
   ));
   if (!panels?.size) return;
 
-  const panel = [...panels.values()].sort((a, b) => b.createdTimestamp - a.createdTimestamp)[0];
+  const sorted = [...panels.values()].sort((a, b) => b.createdTimestamp - a.createdTimestamp);
+  const panel = sorted[0];
   await panel.edit({
     embeds: [new EmbedBuilder()
       .setColor(0xF59E0B)
@@ -103,6 +104,11 @@ async function styleSupportPanel(guild) {
     )],
     allowedMentions: { parse: [] },
   }).catch(() => {});
+
+  for (const duplicate of sorted.slice(1)) {
+    await duplicate.delete().catch(() => {});
+  }
+  await panel.pin('MODS HUB: keep Support panel visible').catch(() => {});
 }
 
 function projectSupportModal(projectKey) {
