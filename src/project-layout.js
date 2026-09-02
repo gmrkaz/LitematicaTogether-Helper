@@ -2,6 +2,7 @@
 
 const layout = require('./project-layout-v2');
 const supportUi = require('./support-ui');
+const { reconcileManagedStructure } = require('./final-structure');
 
 async function orderProjectChannels(project) {
   if (!project) return;
@@ -28,6 +29,7 @@ async function ensureProjectInfrastructure(guild) {
   if (!result) return result;
   await orderProjectChannels(result.ltt);
   await orderProjectChannels(result.simpleTranslator);
+  await reconcileManagedStructure(guild);
   await supportUi.styleSupportPanel(guild);
   return result;
 }
