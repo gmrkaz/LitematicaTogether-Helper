@@ -16,6 +16,35 @@ const PROJECT_NAMES = {
   simpleTranslator: 'Simple Translator',
 };
 
+function supportProjectPickerPayload() {
+  return {
+    embeds: [new EmbedBuilder()
+      .setColor(0x8B5CF6)
+      .setTitle('🧩 Выберите мод / Choose a mod')
+      .setDescription([
+        'Насчёт какого проекта у вас вопрос?',
+        'Which project is your request about?',
+        '',
+        'После выбора откроется короткая форма с темой, версиями, вопросом, срочностью и дополнительной информацией.',
+      ].join('\n'))
+      .setFooter({ text: 'MODS-HUB:SUPPORT:PICKER' })],
+    components: [new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('support_open_ltt')
+        .setLabel('Litematica Together')
+        .setEmoji('🧱')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('support_open_st')
+        .setLabel('Simple Translator')
+        .setEmoji('🌐')
+        .setStyle(ButtonStyle.Secondary),
+    )],
+    ephemeral: true,
+    allowedMentions: { parse: [] },
+  };
+}
+
 async function styleSupportPanel(guild) {
   const cfg = db.guild(guild.id);
   const support = cfg.supportChannelId
@@ -35,34 +64,44 @@ async function styleSupportPanel(guild) {
   const panel = [...panels.values()].sort((a, b) => b.createdTimestamp - a.createdTimestamp)[0];
   await panel.edit({
     embeds: [new EmbedBuilder()
-      .setTitle('Support / Поддержка')
+      .setColor(0xF59E0B)
+      .setTitle('🛟 Support / Поддержка')
       .setDescription([
-        '**Сначала выберите мод, насчёт которого у вас вопрос.**',
-        '**First choose the mod your question is about.**',
-        '',
-        'После выбора откроется форма с полями:',
-        '• смысл вопроса / topic;',
-        '• версии Minecraft, мода и loader;',
-        '• сам вопрос или описание проблемы;',
-        '• срочность и что уже пробовали;',
-        '• дополнительная информация, логи и шаги воспроизведения.',
-        '',
-        'One open ticket per user.',
-      ].join('\n'))],
+        'Если что-то не работает или нужен ответ от команды — создайте Support Request.',
+        'If something is not working or you need help from the team, create a Support Request.',
+      ].join('\n'))
+      .addFields(
+        {
+          name: '🧩 Шаг 1 / Step 1',
+          value: 'Нажмите **Open Support Request** и выберите **Litematica Together** или **Simple Translator**.',
+        },
+        {
+          name: '📝 Шаг 2 / Step 2',
+          value: 'Укажите тему, версии, сам вопрос, срочность и что уже пробовали.',
+        },
+        {
+          name: '📎 После создания / After creation',
+          value: 'При необходимости прикрепите логи, скриншоты или видео прямо в тикет.',
+        },
+        {
+          name: '🎫 Лимит / Limit',
+          value: '**Один открытый тикет на пользователя. / One open ticket per user.**',
+        },
+      )
+      .setFooter({ text: 'MODS-HUB:SUPPORT:PRETTY-V2' })],
     components: [new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId('support_open_ltt')
-        .setLabel('Litematica Together')
+        .setCustomId('support_open')
+        .setLabel('Open Support Request')
+        .setEmoji('🛟')
         .setStyle(ButtonStyle.Primary),
-      new ButtonBuilder()
-        .setCustomId('support_open_st')
-        .setLabel('Simple Translator')
-        .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId('donate_show')
         .setLabel('Donate')
+        .setEmoji('💜')
         .setStyle(ButtonStyle.Success),
     )],
+    allowedMentions: { parse: [] },
   }).catch(() => {});
 }
 
@@ -137,5 +176,6 @@ function projectSupportModal(projectKey) {
 module.exports = {
   PROJECT_NAMES,
   projectSupportModal,
+  supportProjectPickerPayload,
   styleSupportPanel,
 };
