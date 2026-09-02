@@ -36,5 +36,6 @@ module.exports = {
   PROJECTS: layout.PROJECTS,
   ensureProjectInfrastructure,
   projectSupportModal: supportUi.projectSupportModal,
+  supportProjectPickerPayload: supportUi.supportProjectPickerPayload,
   styleSupportPanel: supportUi.styleSupportPanel,
 };
