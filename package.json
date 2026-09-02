@@ -1,13 +1,13 @@
 {
   "name": "litematica-together-helper",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "private": true,
   "description": "Discord support and monitoring hub for Litematica Together and Simple Translator, plus the Litematica Together relay service",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
     "start": "node index.js",
-    "check": "node --check index.js && node --check src/index.js && node --check src/ltt-service.js && node --check src/bot.js && node --check src/common.js && node --check src/community.js && node --check src/onboarding.js && node --check src/voice-layout.js && node --check src/modrinth-watch.js && node --check src/project-layout.js && node --check src/project-layout-v2.js && node --check src/support-ui.js && node --check src/language-community.js && node --check src/legacy-community-cleanup.js && node --check src/channel-cleanup.js && node --check src/role-styles.js && node --check src/db.js && node --check src/infra.js && node --check src/support.js && node --check src/escalation.js"
+    "check": "node --check index.js && node --check src/index.js && node --check src/ltt-service.js && node --check src/bot.js && node --check src/common.js && node --check src/community.js && node --check src/onboarding.js && node --check src/voice-layout.js && node --check src/modrinth-watch.js && node --check src/project-layout.js && node --check src/project-layout-v2.js && node --check src/support-ui.js && node --check src/presentation.js && node --check src/language-community.js && node --check src/legacy-community-cleanup.js && node --check src/channel-cleanup.js && node --check src/role-styles.js && node --check src/db.js && node --check src/infra.js && node --check src/support.js && node --check src/escalation.js"
   },
   "engines": {
     "node": ">=20"
