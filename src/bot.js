@@ -12,8 +12,9 @@ const { ensureLanguageCommunity } = require('./language-community');
 const { cleanupGithubChannels } = require('./channel-cleanup');
 const { cleanupLegacyCommunity } = require('./legacy-community-cleanup');
 const {
-  ensureProjectInfrastructure, projectSupportModal, styleSupportPanel,
+  ensureProjectInfrastructure, projectSupportModal, supportProjectPickerPayload, styleSupportPanel,
 } = require('./project-layout');
+const { ensurePresentation } = require('./presentation');
 const { startModrinthWatcher } = require('./modrinth-watch');
 const {
   openTicket, claimTicket, closeTicket, addTicketMember, removeTicketMember, syncTicketAccess,
@@ -51,6 +52,7 @@ async function prepareGuild(guild, { forcePanel = false } = {}) {
     await cleanupLegacyCommunity(guild);
     await cleanupGithubChannels(guild);
     await ensureProjectInfrastructure(guild);
+    await ensurePresentation(guild);
   } else {
     await syncTicketAccess(guild);
   }
@@ -62,7 +64,7 @@ client.once(Events.ClientReady, async c => {
     if (TARGET && g.id !== TARGET) continue;
     try {
       await prepareGuild(g);
-      console.log(`[SETUP] Dual-mod infrastructure, RU/GB community, projects, onboarding and ticket access ready in ${g.name}`);
+      console.log(`[SETUP] Dual-mod infrastructure, polished presentation, RU/GB community, projects, onboarding and ticket access ready in ${g.name}`);
     } catch (e) {
       console.error(`[SETUP] ${g.name}`, e);
     }
@@ -81,12 +83,9 @@ client.on(Events.InteractionCreate, async i => {
 
     if (i.isButton()) {
       if (i.customId === 'donate_show') return i.reply({ ...donationPayload(), ephemeral: true });
-      if (i.customId === 'support_open' || i.customId === 'support_open_ltt') {
-        return i.showModal(projectSupportModal('ltt'));
-      }
-      if (i.customId === 'support_open_st') {
-        return i.showModal(projectSupportModal('simpleTranslator'));
-      }
+      if (i.customId === 'support_open') return i.reply(supportProjectPickerPayload());
+      if (i.customId === 'support_open_ltt') return i.showModal(projectSupportModal('ltt'));
+      if (i.customId === 'support_open_st') return i.showModal(projectSupportModal('simpleTranslator'));
       if (i.customId === 'ticket_close') return closeTicket(i);
       if (i.customId === 'ticket_claim') return claimTicket(i);
     }
@@ -115,8 +114,9 @@ client.on(Events.InteractionCreate, async i => {
       await cleanupLegacyCommunity(i.guild);
       await cleanupGithubChannels(i.guild);
       await ensureProjectInfrastructure(i.guild);
+      await ensurePresentation(i.guild);
       const nativeState = onboarding.onboarding?.enabled ? 'enabled' : 'configured but not enabled';
-      return i.editReply(`Litematica Together + Simple Translator, COMMUNITY RU/GB, project sections, Support, native onboarding (${nativeState}), language voice rooms and monitoring are ready.`);
+      return i.editReply(`Litematica Together + Simple Translator, polished channel presentation, COMMUNITY RU/GB, project sections, Support, native onboarding (${nativeState}), language voice rooms and monitoring are ready.`);
     }
 
     if (i.commandName === 'support-panel') {
@@ -124,7 +124,7 @@ client.on(Events.InteractionCreate, async i => {
       if (!ch) return i.reply({ content: 'Run /setup-server first.', ephemeral: true });
       await postPanel(ch);
       await styleSupportPanel(i.guild);
-      return i.reply({ content: 'Dual-project Support panel posted.', ephemeral: true });
+      return i.reply({ content: 'Polished dual-project Support panel posted.', ephemeral: true });
     }
 
     if (i.commandName === 'ticket-close') return closeTicket(i);
