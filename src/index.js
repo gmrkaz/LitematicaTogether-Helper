@@ -4,6 +4,8 @@
 require('./escalation').installEscalationHook();
 // Apply Discord Enhanced Role Styles as soon as the client becomes ready.
 require('./role-styles').installRoleStylesHook();
+// Keep pinned cards, but remove Discord's noisy "pinned a message" system notices.
+require('./pin-notifications').installPinNotificationCleanupHook();
 
 // Discord HELPER stays in the main process. The Litematica Together relay runs
 // separately, so a relay crash or memory spike cannot intentionally terminate
