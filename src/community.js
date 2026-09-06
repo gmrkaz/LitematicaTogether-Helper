@@ -4,8 +4,6 @@ const db = require('./db');
 const HIDDEN_ROLE_NAME = 'Hidden';
 const START_HERE_CATEGORY_NAME = 'START HERE';
 const WELCOME_CHANNEL_NAME = 'welcome';
-const RULES_CHANNEL_NAME = 'rules';
-const FAQ_CHANNEL_NAME = 'faq';
 
 const roleByName = (guild, name) => guild.roles.cache.find(role => role.name === name);
 const channelByName = (guild, name, types = null) => guild.channels.cache.find(channel => (
@@ -23,18 +21,13 @@ function categoryByNames(guild, names) {
   ));
 }
 
+// Kept as exported compatibility helpers for older modules/integrations. The
+// final server no longer creates START HERE/#rules or START HERE/#faq.
 function rulesPayload() {
   return {
     embeds: [new EmbedBuilder()
-      .setTitle('Server Rules')
-      .setDescription([
-        'Simple version: Let\'s keep this server clean and "on topic".',
-        '',
-        '- No politics, religion, and other IRL stuff that is not in any way related to this server, and can or will cause drama at some point',
-        '- No memes or other similar content, because that can easily become too edgy and disturbing and lead to increased moderation need and time usage',
-        '- Respect everyone else as human beings (presumably there aren\'t any AI bots here yet...), and don\'t attack or insult or judge anyone else for who they are or what they think of whatever subject',
-        '- Try to keep discussions and questions on the relevant channels as much as possible, and avoid off-topic threads/rants on the topic/mod-specific channels',
-      ].join('\n'))],
+      .setTitle('Server Rules / Правила сервера')
+      .setDescription('Use **COMMUNITY RU → #правила** or **COMMUNITY GB → #rules** for the full language-specific rules.')],
     allowedMentions: { parse: [] },
   };
 }
@@ -43,15 +36,8 @@ function faqPayload(supportChannelId = null) {
   const support = supportChannelId ? `<#${supportChannelId}>` : '#support';
   return {
     embeds: [new EmbedBuilder()
-      .setTitle('Frequently Asked Questions')
-      .setDescription([
-        `**Where can I get help?**\nGo to ${support} and press **Open Support Request**.`,
-        '**What should I include in a support request?**\nInclude your Litematica Together, Minecraft, Litematica and MaLiLib versions, explain what happened, what you expected to happen, and attach logs/screenshots when useful.',
-        '**Can I open several support tickets at once?**\nNo. The support system allows one open ticket per user.',
-        `**Where do I report bugs, connection/sync problems or suggestions?**\nUse ${support}. The same support form is used for bugs, installation, connection, synchronization, compatibility questions and suggestions.`,
-        '**How can I support the project?**\nUse the **Donate** button in the support panel or the `/donate` command.',
-        '**Where should general discussion go?**\nPlease use the channel that best matches the topic and keep mod-specific channels focused on Litematica Together.',
-      ].join('\n\n'))],
+      .setTitle('Help / Помощь')
+      .setDescription(`For technical help with **Litematica Together** or **Simple Translator**, use ${support}.`)],
     allowedMentions: { parse: [] },
   };
 }
@@ -61,13 +47,11 @@ function welcomePayload() {
     embeds: [new EmbedBuilder()
       .setTitle('Welcome / Добро пожаловать')
       .setDescription([
-        'Welcome to the Litematica Together community!',
-        'Добро пожаловать в сообщество Litematica Together!',
+        'Official community for **Litematica Together** and **Simple Translator**.',
+        'Официальное сообщество **Litematica Together** и **Simple Translator**.',
         '',
-        'Your language is selected in Discord\'s onboarding screen before you enter the server.',
-        'Язык выбирается во встроенном окне Discord до входа на сервер.',
-        '',
-        'Please read **#rules** and check **#faq** if you have questions.',
+        'Discord Onboarding selects **Русский** or **English** before you enter the server.',
+        'Discord Onboarding выбирает **Русский** или **English** до входа на сервер.',
       ].join('\n'))],
     components: [],
     allowedMentions: { parse: [] },
@@ -82,7 +66,7 @@ async function ensureHiddenRole(guild) {
       permissions: [],
       hoist: false,
       mentionable: false,
-      reason: 'LTT HELPER: role for hiding members from server channels',
+      reason: 'MODS HUB: role for hiding members from server channels',
     });
   }
   return role;
@@ -111,6 +95,7 @@ function readOnlyOverwrites(guild, hiddenRole) {
         PermissionFlagsBits.SendMessages,
         PermissionFlagsBits.ReadMessageHistory,
         PermissionFlagsBits.EmbedLinks,
+        PermissionFlagsBits.ManageMessages,
       ],
     });
   }
@@ -123,14 +108,14 @@ async function ensureStartHereCategory(guild, hiddenRole) {
 
   if (!startHere && info) {
     startHere = info;
-    await startHere.setName(START_HERE_CATEGORY_NAME, 'LTT HELPER: merge INFO into START HERE').catch(() => {});
+    await startHere.setName(START_HERE_CATEGORY_NAME, 'MODS HUB: merge INFO into START HERE').catch(() => {});
   }
 
   if (!startHere) {
     startHere = await guild.channels.create({
       name: START_HERE_CATEGORY_NAME,
       type: ChannelType.GuildCategory,
-      reason: 'LTT HELPER: onboarding, rules and FAQ',
+      reason: 'MODS HUB: clean onboarding and navigation category',
     });
   }
 
@@ -139,15 +124,15 @@ async function ensureStartHereCategory(guild, hiddenRole) {
     for (const child of children.values()) {
       await child.setParent(startHere.id, { lockPermissions: false }).catch(() => {});
     }
-    await info.delete('LTT HELPER: INFO merged into START HERE').catch(() => {});
+    await info.delete('MODS HUB: INFO merged into START HERE').catch(() => {});
   }
 
   if (startHere.name !== START_HERE_CATEGORY_NAME) {
-    await startHere.setName(START_HERE_CATEGORY_NAME, 'LTT HELPER: normalize onboarding category').catch(() => {});
+    await startHere.setName(START_HERE_CATEGORY_NAME, 'MODS HUB: normalize onboarding category').catch(() => {});
   }
 
   await startHere.permissionOverwrites.edit(hiddenRole, { ViewChannel: false }, {
-    reason: 'LTT HELPER: Hidden role cannot view server channels',
+    reason: 'MODS HUB: Hidden role cannot view server channels',
   }).catch(() => {});
   await startHere.setPosition(0).catch(() => {});
   return startHere;
@@ -164,7 +149,7 @@ async function ensureReadOnlyChannel(guild, category, hiddenRole, name, topic) {
       parent: category.id,
       topic,
       permissionOverwrites,
-      reason: 'LTT HELPER: community information channel',
+      reason: 'MODS HUB: information channel',
     });
   } else {
     await channel.setParent(category.id, { lockPermissions: false }).catch(() => {});
@@ -172,20 +157,6 @@ async function ensureReadOnlyChannel(guild, category, hiddenRole, name, topic) {
     await channel.permissionOverwrites.set(permissionOverwrites).catch(() => {});
   }
   return channel;
-}
-
-async function upsertBotEmbed(channel, title, payload) {
-  const recent = await channel.messages.fetch({ limit: 50 }).catch(() => null);
-  const existing = recent?.find(message => (
-    message.author.id === channel.client.user.id
-    && message.embeds.some(embed => embed.title === title)
-  ));
-
-  if (existing) {
-    await existing.edit(payload).catch(() => {});
-    return existing;
-  }
-  return channel.send(payload);
 }
 
 async function upsertWelcomeMessage(channel) {
@@ -198,7 +169,11 @@ async function upsertWelcomeMessage(channel) {
     const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
     existing = recent?.find(message => (
       message.author.id === channel.client.user.id
-      && message.embeds.some(embed => ['Welcome / Добро пожаловать', 'Choose your language / Выберите язык'].includes(embed.title))
+      && message.embeds.some(embed => [
+        'Welcome / Добро пожаловать',
+        'Choose your language / Выберите язык',
+        '✨ Добро пожаловать / Welcome',
+      ].includes(embed.title))
     ));
   }
 
@@ -208,7 +183,7 @@ async function upsertWelcomeMessage(channel) {
   cfg.welcomeChannelId = channel.id;
   cfg.welcomeMessageId = existing.id;
   db.save();
-  await existing.pin('LTT HELPER: keep welcome information at the top').catch(() => {});
+  if (!existing.pinned) await existing.pin('MODS HUB: keep welcome information at the top').catch(() => {});
   return existing;
 }
 
@@ -230,7 +205,7 @@ async function hideMemberFromChannel(member, channel, snapshots) {
   if (!channel?.permissionOverwrites?.edit || channel.isThread?.()) return;
   snapshots[channel.id] ??= viewState(channel, member.id);
   await channel.permissionOverwrites.edit(member, { ViewChannel: false }, {
-    reason: 'LTT HELPER: member has Hidden role',
+    reason: 'MODS HUB: member has Hidden role',
   });
 }
 
@@ -259,7 +234,7 @@ async function restoreMemberVisibility(member) {
     if (!channel?.permissionOverwrites?.edit || channel.isThread?.()) continue;
     const value = state === 'allow' ? true : state === 'deny' ? false : null;
     await channel.permissionOverwrites.edit(member, { ViewChannel: value }, {
-      reason: 'LTT HELPER: Hidden role removed; restore previous visibility',
+      reason: 'MODS HUB: Hidden role removed; restore previous visibility',
     }).catch(() => {});
   }
 
@@ -304,7 +279,7 @@ async function applyHiddenRoleToChannel(channel, role = null) {
   if (!hiddenRole) return;
 
   await channel.permissionOverwrites.edit(hiddenRole, { ViewChannel: false }, {
-    reason: 'LTT HELPER: Hidden role cannot view server channels',
+    reason: 'MODS HUB: Hidden role cannot view server channels',
   });
 
   const allSnapshots = hiddenSnapshots(channel.guild);
@@ -338,7 +313,7 @@ async function sendWelcomeNotification(member) {
   }).catch(() => {});
 }
 
-async function ensureCommunityInfrastructure(guild, { supportChannelId = null } = {}) {
+async function ensureCommunityInfrastructure(guild) {
   await guild.roles.fetch();
   await guild.channels.fetch();
 
@@ -349,30 +324,11 @@ async function ensureCommunityInfrastructure(guild, { supportChannelId = null } 
     startHere,
     hiddenRole,
     WELCOME_CHANNEL_NAME,
-    'Welcome information. Language selection happens in Discord onboarding before joining.',
-  );
-  const rules = await ensureReadOnlyChannel(
-    guild,
-    startHere,
-    hiddenRole,
-    RULES_CHANNEL_NAME,
-    'Official Litematica Together server rules.',
-  );
-  const faq = await ensureReadOnlyChannel(
-    guild,
-    startHere,
-    hiddenRole,
-    FAQ_CHANNEL_NAME,
-    'Frequently asked questions and support information.',
+    'Welcome and navigation for Litematica Together + Simple Translator.',
   );
 
   await welcome.setPosition(0).catch(() => {});
-  await rules.setPosition(1).catch(() => {});
-  await faq.setPosition(2).catch(() => {});
-
   await upsertWelcomeMessage(welcome);
-  await upsertBotEmbed(rules, 'Server Rules', rulesPayload());
-  await upsertBotEmbed(faq, 'Frequently Asked Questions', faqPayload(supportChannelId));
 
   const cfg = db.guild(guild.id);
   Object.assign(cfg, {
@@ -384,7 +340,7 @@ async function ensureCommunityInfrastructure(guild, { supportChannelId = null } 
   await applyHiddenRoleToAllChannels(guild, hiddenRole);
   await syncHiddenMembers(guild, hiddenRole);
 
-  return { hiddenRole, startHere, welcome, rules, faq };
+  return { hiddenRole, startHere, welcome };
 }
 
 module.exports = {
